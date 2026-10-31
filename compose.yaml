@@ -1,0 +1,52 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: freshflow
+      MYSQL_USER: freshflow
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-freshflow}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-local-root-password}
+    ports:
+      - "3307:3306"
+    volumes:
+      - freshflow-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-local-root-password}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: ./apps/api
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DATABASE_URL: mysql+pymysql://freshflow:${MYSQL_PASSWORD:-freshflow}@mysql:3306/freshflow?charset=utf8mb4
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-replace-before-deploy}
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      WS_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --hostname 0.0.0.0"
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/api/v1/ws}
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_DIST_DIR: .next-docker
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web:/app
+      - freshflow-web-node-modules:/app/node_modules
+    depends_on:
+      - api
+
+volumes:
+  freshflow-mysql:
+  freshflow-web-node-modules:
