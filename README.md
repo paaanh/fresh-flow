@@ -6,7 +6,7 @@
 > **Repository:** `freshflow`  
 > **Trạng thái:** Đang triển khai nền tảng; xem `apps/api/README.md` và `PHAN_CONG_CONG_VIEC.md` để biết phạm vi đã dựng và cách chạy backend.
 
-FreshFlow là hệ thống web quản lý và phân phối hàng hóa theo ngày. Quản trị viên quản lý sản phẩm, giá theo nhóm khách hàng, số lượng hàng có thể cung cấp, đơn hàng, yêu cầu mặt hàng, giao hàng, tài khoản, kiểm duyệt nội dung và báo cáo. Khách hàng đăng ký, xác minh tài khoản, xem hàng còn lại, đặt nhiều sản phẩm trong một đơn, gửi yêu cầu mặt hàng và chat với người bán.
+FreshFlow là hệ thống web quản lý và phân phối hàng hóa theo ngày. Quản trị viên quản lý sản phẩm, giá theo nhóm khách hàng, số lượng hàng có thể cung cấp, đơn hàng, yêu cầu mặt hàng, giao hàng, tài khoản, kiểm duyệt nội dung và báo cáo. Khách hàng đăng ký, xác minh tài khoản, xem hàng còn lại, đặt nhiều sản phẩm trong một đơn và gửi yêu cầu mặt hàng.
 
 Mục tiêu của hệ thống là cung cấp dữ liệu nhất quán, cập nhật gần thời gian thực và có thể triển khai thực tế. Mục tiêu tải ban đầu là **1.000–2.000 người dùng hoạt động đồng thời**, cần được xác minh bằng kiểm thử tải trên hạ tầng triển khai cụ thể.
 
@@ -52,7 +52,7 @@ flowchart TD
 | Frontend | Next.js, TypeScript | Giao diện khách hàng và quản trị |
 | UI | Tailwind CSS, Font Awesome | Responsive UI và biểu tượng |
 | Backend | Python + FastAPI | REST API, nghiệp vụ và xác thực |
-| Realtime | FastAPI WebSocket / WebSocket endpoint | Cập nhật tồn kho, trạng thái đơn, chat và thông báo |
+| Realtime | FastAPI WebSocket / WebSocket endpoint | Cập nhật tồn kho, trạng thái đơn và thông báo |
 | Database | MySQL 8.x | Dữ liệu nghiệp vụ và transaction |
 | ORM / migration | SQLAlchemy 2.x + Alembic | Mapping dữ liệu và quản lý thay đổi schema |
 | Validation | Pydantic | Kiểm tra dữ liệu đầu vào và đầu ra |
@@ -109,7 +109,6 @@ freshflow/
 │       │   │   ├── orders/
 │       │   │   ├── delivery/
 │       │   │   ├── product_requests/
-│       │   │   ├── chat/
 │       │   │   ├── notifications/
 │       │   │   ├── moderation/
 │       │   │   ├── reports/
@@ -171,7 +170,6 @@ freshflow/
 | Orders | Tạo đơn nhiều sản phẩm, duyệt/từ chối, trạng thái và lịch sử |
 | Delivery | Điểm giao tập trung, giao riêng, lịch giao và thông tin giao hàng |
 | Product Requests | Yêu cầu mặt hàng chưa có, báo giá và trạng thái xử lý |
-| Chat | Hội thoại riêng, tin nhắn văn bản/hình ảnh và lịch sử |
 | Notifications | Thông báo trong website, trạng thái đã đọc/chưa đọc |
 | Moderation | Từ khóa hạn chế, che từ, cảnh báo, nhật ký vi phạm |
 | Reports | Báo cáo cơ bản theo ngày/tháng |
@@ -224,14 +222,6 @@ Vì hệ thống chỉ trừ kho khi duyệt đơn, lượng khách đã đặt 
 - Người đi làm áp dụng giá và phí giao riêng theo chính sách.
 - Quy tắc hủy đơn, hoàn kho, hoàn tiền và thay đổi lịch giao phải được định nghĩa riêng.
 
-### 4.5. Chat và kiểm duyệt
-
-- Mỗi hội thoại có quyền truy cập được kiểm tra ở backend.
-- Tin nhắn mới được lưu trước khi thông báo thành công.
-- Hình ảnh cần giới hạn dung lượng, kiểm tra định dạng và được lưu trong storage phù hợp; MySQL chỉ nên lưu metadata/đường dẫn, không mặc định lưu trực tiếp file nhị phân lớn.
-- Bộ lọc từ khóa che nội dung vi phạm, cảnh báo người gửi, tạo thông báo cho quản trị viên và lưu nhật ký.
-- Cần quy định cách xử lý biến thể chữ hoa/thường, dấu tiếng Việt, khoảng trắng, ký tự xen kẽ và trường hợp từ khóa xuất hiện trong từ khác.
-
 ---
 
 ## 5. Thiết kế realtime
@@ -244,7 +234,6 @@ Vì hệ thống chỉ trừ kho khi duyệt đơn, lượng khách đã đặt 
 - Số lượng hàng và trạng thái đợt hàng thay đổi.
 - Trạng thái đơn hàng được cập nhật.
 - Có thông báo mới.
-- Có tin nhắn chat mới.
 - Quản trị viên nhận cảnh báo kiểm duyệt.
 
 WebSocket không thay thế REST API và cũng không tự bảo đảm dữ liệu đã được lưu bền vững. Dữ liệu quan trọng phải được ghi vào MySQL trước khi phát thông báo thành công.
@@ -256,7 +245,6 @@ WebSocket không thay thế REST API và cũng không tự bảo đảm dữ li�
 | `inventory.updated` | Server → client có quyền | Số lượng khả dụng hoặc số liệu sản phẩm thay đổi |
 | `order.status_changed` | Server → khách liên quan | Trạng thái đơn hàng thay đổi |
 | `notification.created` | Server → người nhận | Có thông báo mới |
-| `chat.message_created` | Server → thành viên hội thoại | Có tin nhắn mới |
 | `moderation.alert_created` | Server → quản trị viên | Có nội dung cần xem xét |
 | `connection.ready` | Server → client | Kết nối đã xác thực và sẵn sàng |
 
@@ -298,9 +286,6 @@ Các bảng sau là gợi ý ban đầu; schema chính thức phải được ho
 | `delivery_slots` | Khung giờ/điểm giao và điều kiện áp dụng |
 | `deliveries` | Thông tin giao hàng và trạng thái |
 | `product_requests` | Yêu cầu mặt hàng chưa có |
-| `conversations` | Hội thoại |
-| `conversation_members` | Thành viên hội thoại và quyền truy cập |
-| `messages` | Tin nhắn và metadata file đính kèm |
 | `notifications` | Thông báo, người nhận và trạng thái đã đọc |
 | `moderation_terms` | Danh sách từ ngữ hạn chế |
 | `moderation_violations` | Nhật ký vi phạm và hành động xử lý |
@@ -328,7 +313,7 @@ Danh sách kiểm tra tối thiểu:
 - [ ] HTTPS/WSS ở môi trường triển khai.
 - [ ] Hash mật khẩu bằng thuật toán phù hợp như Argon2id hoặc bcrypt với cấu hình an toàn.
 - [ ] OTP có thời hạn, giới hạn số lần thử và giới hạn gửi lại; không ghi OTP rõ vào log.
-- [ ] Rate limit đăng nhập, gửi OTP, tạo đơn, gửi chat và các endpoint nhạy cảm.
+- [ ] Rate limit đăng nhập, gửi OTP, tạo đơn và các endpoint nhạy cảm.
 - [ ] Truy vấn SQL tham số hóa/ORM; không ghép chuỗi đầu vào thành SQL.
 - [ ] Kiểm tra quyền ở backend cho mọi tài nguyên riêng tư.
 - [ ] Kiểm tra `Origin` của WebSocket và xác thực kết nối; không cho phép truy cập event room trái quyền.
@@ -354,7 +339,6 @@ Token lưu ở đâu, có refresh token hay không, thời gian hết hạn và 
 - Xác nhận đơn hàng và chọn địa chỉ/hình thức giao.
 - Lịch sử đơn hàng và chi tiết trạng thái.
 - Danh sách yêu cầu mặt hàng và tạo yêu cầu mới.
-- Chat và lịch sử hội thoại.
 - Trung tâm thông báo.
 - Quản lý hồ sơ, nhóm khách hàng và tối đa ba địa chỉ giao hàng.
 
@@ -366,7 +350,6 @@ Token lưu ở đâu, có refresh token hay không, thời gian hết hạn và 
 - Quản lý giá theo nhóm khách hàng và phí giao hàng.
 - Quản lý khách hàng, trạng thái tài khoản và lịch sử thao tác.
 - Duyệt đơn, xử lý yêu cầu mặt hàng và quản lý giao hàng.
-- Chat và xử lý cảnh báo kiểm duyệt.
 - Quản lý danh sách từ ngữ hạn chế và nhật ký vi phạm.
 - Quản lý thông báo.
 - Báo cáo doanh thu và đơn hàng theo ngày/tháng.
@@ -442,15 +425,12 @@ Token lưu ở đâu, có refresh token hay không, thời gian hết hạn và 
 
 **Tiêu chí hoàn thành:** Không duyệt vượt tồn kho khi có các thao tác đồng thời.
 
-### Giai đoạn 6 — WebSocket, thông báo và chat
+### Giai đoạn 6 — WebSocket và thông báo
 
 - [ ] Xác thực kết nối WebSocket.
 - [ ] Cập nhật sản phẩm/tồn kho realtime.
 - [ ] Cập nhật trạng thái đơn realtime.
 - [ ] Thông báo trong website và trạng thái đã đọc.
-- [ ] Chat riêng, phân quyền hội thoại và lưu lịch sử.
-- [ ] Gửi ảnh có kiểm tra an toàn.
-- [ ] Bộ lọc từ ngữ, che từ và cảnh báo quản trị viên.
 - [ ] Kiểm thử reconnect, mất kết nối và dữ liệu đồng bộ lại.
 - [ ] Cân nhắc Transactional Outbox và pub/sub nếu triển khai nhiều instance.
 
@@ -531,8 +511,8 @@ FreshFlow được xem là sẵn sàng nghiệm thu khi:
 3. Khách hàng đặt được nhiều sản phẩm trong một đơn với giá và phí giao chính xác.
 4. Duyệt đơn không làm tồn kho vượt giới hạn trong các tình huống đồng thời.
 5. Trạng thái đơn, số lượng hàng và thông báo được cập nhật realtime theo đúng quyền.
-6. Yêu cầu mặt hàng và chat được lưu, theo dõi và phân quyền đúng.
-7. Bộ lọc từ ngữ, cảnh báo, nhật ký vi phạm và nhật ký quản trị hoạt động.
+6. Yêu cầu mặt hàng được lưu và theo dõi đúng.
+7. Các chức năng kiểm duyệt và nhật ký quản trị hoạt động.
 8. Báo cáo ngày/tháng đối chiếu được với dữ liệu nguồn.
 9. Các kiểm thử chức năng, bảo mật cơ bản và tải đạt tiêu chí đã thỏa thuận.
 10. Có hướng dẫn cấu hình, triển khai, backup/restore và bàn giao.
