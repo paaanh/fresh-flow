@@ -12,7 +12,6 @@ from app.modules.product_requests.router import router as product_requests_route
 from app.modules.notifications.router import router as notifications_router
 from app.modules.moderation.router import router as moderation_router
 from app.modules.reports.router import router as reports_router
-from app.modules.chat.router import router as chat_router
 from app.realtime.router import router as realtime_router
 
 router = APIRouter()
@@ -29,5 +28,4 @@ router.include_router(product_requests_router)
 router.include_router(notifications_router)
 router.include_router(moderation_router)
 router.include_router(reports_router)
-router.include_router(chat_router)
 router.include_router(realtime_router)

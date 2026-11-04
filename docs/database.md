@@ -61,7 +61,7 @@ Các input chính:
 - `BatchIn`: `batch_date`, `initial_quantity`, `is_open?`.
 - `PriceRuleIn`: `customer_group` (`STUDENT` hoặc `WORKING`), `unit_price`.
 - `DeliverySlotIn`: `name`, `customer_group?`, `fee`, `is_active?`.
-- `ProductOut` có thêm `available_quantity`.
+- `ProductOut` có `available_quantity`. Catalog khách hàng (`GET /api/v1/catalog/me`) trả thêm `batches` đang mở và còn hàng, gồm `id` (dùng làm `batch_id` khi đặt đơn), `batch_date`, `is_open` và `available_quantity`.
 
 ### 1.4. Orders
 
@@ -89,7 +89,7 @@ Các input chính:
 
 `OrderStatusIn.status` nhận một trong: `APPROVED`, `REJECTED`, `PREPARING`, `DELIVERING`, `COMPLETED`, `CANCELLED`.
 
-### 1.5. Product requests, notifications và chat
+### 1.5. Product requests and notifications
 
 | Method | Path | Quyền | Request/query chính | Response |
 |---|---|---|---|---|
@@ -98,9 +98,6 @@ Các input chính:
 | `PATCH` | `/api/v1/admin/product-requests/{request_id}` | ADMIN | JSON `ProductRequestResponseIn` | Product request đã xử lý |
 | `GET` | `/api/v1/notifications` | USER | — | Danh sách `NotificationOut` |
 | `PATCH` | `/api/v1/notifications/{notification_id}/read` | USER | — | Không có nội dung (204) |
-| `POST` | `/api/v1/conversations` | USER | JSON `ConversationIn`: `participant_id?` | Conversation (201) |
-| `GET` | `/api/v1/conversations/{conversation_id}/messages` | USER | — | Danh sách message |
-| `POST` | `/api/v1/conversations/{conversation_id}/messages` | USER | JSON `MessageIn`: `body` | Message (201) |
 
 `ProductRequestIn` gồm `product_name`, `description?`.
 `ProductRequestResponseIn.status` nhận một trong: `QUOTED`, `ACCEPTED`, `REJECTED`, `FULFILLED`; ngoài ra có `admin_response?`, `quoted_price?`.
@@ -130,7 +127,7 @@ Server event có envelope:
 }
 ```
 
-Các event chính: `connection.ready`, `inventory.updated`, `order.status_changed`, `notification.created`, `chat.message_created`.
+Các event chính: `connection.ready`, `inventory.updated`, `order.status_changed`, `notification.created`.
 
 ## 2. Database schema
 
@@ -301,34 +298,7 @@ Unique constraint: `(product_id, customer_group)`.
 | `is_read` | BOOLEAN | NOT NULL, mặc định `false` |
 | `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
 
-### 2.5. Bảng chat và kiểm duyệt
-
-#### `conversations`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-#### `conversation_members`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `conversation_id` | INTEGER | FK `conversations.id` ON DELETE CASCADE |
-| `user_id` | INTEGER | FK `users.id` ON DELETE CASCADE, index |
-
-Unique constraint: `(conversation_id, user_id)`.
-
-#### `messages`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `conversation_id` | INTEGER | FK `conversations.id` ON DELETE CASCADE, index |
-| `sender_id` | INTEGER | FK `users.id` |
-| `body` | TEXT | NOT NULL |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
+### 2.5. Moderation
 
 #### `moderation_terms`
 
@@ -344,7 +314,6 @@ Unique constraint: `(conversation_id, user_id)`.
 |---|---|---|
 | `id` | INTEGER | PK |
 | `user_id` | INTEGER | FK `users.id`, index |
-| `conversation_id` | INTEGER | NULL, FK `conversations.id` |
 | `matched_term` | VARCHAR(100) | NOT NULL |
 | `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
 
@@ -369,8 +338,6 @@ users 1--N addresses
 users 1--N orders
 users 1--N product_requests
 users 1--N notifications
-users 1--N conversation_members
-users 1--N messages
 users 1--N moderation_violations
 users 1--N audit_logs
 
@@ -382,9 +349,6 @@ products 1--N order_items
 orders 1--N order_items
 orders 1--N order_status_history
 inventory_batches 1--N order_items
-conversations 1--N conversation_members
-conversations 1--N messages
-conversations 1--N moderation_violations
 ```
 
 ## 4. Ghi chú triển khai

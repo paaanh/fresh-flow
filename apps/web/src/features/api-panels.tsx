@@ -87,6 +87,9 @@ export function ApiCheckout({ total, money, cart, done }: { total: number; money
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [addressId, setAddressId] = useState(0);
+  const [addressDraft, setAddressDraft] = useState<AddressIn>({ label: 'Nhà', recipient: '', phone: '', line1: '', ward: '', district: '', city: '', is_default: false });
+  const [showAddressForm, setShowAddressForm] = useState(false);
+  const [savingAddress, setSavingAddress] = useState(false);
   const [slotId, setSlotId] = useState(0);
   const [pickup, setPickup] = useState(true);
   const [note, setNote] = useState('');
@@ -101,12 +104,24 @@ export function ApiCheckout({ total, money, cart, done }: { total: number; money
       if (!alive) return;
       setAddresses(addresses); setSlots(slots.filter(slot => slot.is_active !== false));
       setAddressId(addresses.find(address => address.is_default)?.id || addresses[0]?.id || 0);
+      setAddressDraft(current => ({ ...current, recipient: current.recipient || '' }));
+      setShowAddressForm(addresses.length === 0);
       try { allocateOrderItems(catalog, cart); setBatchError(''); }
       catch (error) { setBatchError(message(error)); }
       setLoaded(true);
     }).catch(error => { if (alive) setError(message(error)); });
     return () => { alive = false; };
   }, [cart]);
+  async function saveAddress() {
+    setSavingAddress(true); setError('');
+    try {
+      const created = await freshflow.createAddress<Address>(addressDraft);
+      setAddresses(current => [...current, created]);
+      setAddressId(created.id);
+      setShowAddressForm(false);
+    } catch (error) { setError(message(error)); }
+    finally { setSavingAddress(false); }
+  }
   const fee = Number(slots.find(slot => slot.id === slotId)?.fee || 0);
   return <form className="panel mx-auto max-w-2xl space-y-4 p-5" onSubmit={async event => {
     event.preventDefault(); setBusy(true);
@@ -116,9 +131,15 @@ export function ApiCheckout({ total, money, cart, done }: { total: number; money
   }}>
     <h2 className="font-bold">Xác nhận đơn hàng</h2>
     {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
-    {batchError && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Chưa thể gửi đơn: backend chưa cung cấp mã lô hàng khả dụng cho catalog khách hàng. {batchError}</p>}
+    {batchError && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Chưa thể gửi đơn: {batchError}</p>}
     <label className="block text-sm">Phương thức nhận hàng<select className={field} value={pickup ? 'pickup' : 'delivery'} onChange={event => setPickup(event.target.value === 'pickup')}><option value="pickup">Nhận tại điểm giao</option><option value="delivery">Giao đến địa chỉ</option></select></label>
-    {!pickup && <label className="block text-sm">Địa chỉ<select className={field} required value={addressId || ''} onChange={event => setAddressId(Number(event.target.value))}><option value="">Chọn địa chỉ</option>{addresses.map(address => <option key={address.id} value={address.id}>{address.label}: {addressText(address)}</option>)}</select><Link href="/profile" className="text-xs text-emerald-700">Quản lý địa chỉ</Link></label>}
+    {!pickup && <div className="space-y-2"><label className="block text-sm">Địa chỉ<select className={field} required value={addressId || ''} onChange={event => setAddressId(Number(event.target.value))}><option value="">Chọn địa chỉ</option>{addresses.map(address => <option key={address.id} value={address.id}>{address.label}: {addressText(address)}</option>)}</select></label>
+      <div className="flex items-center gap-3 text-xs"><button type="button" className="text-emerald-700" onClick={() => setShowAddressForm(value => !value)}>{showAddressForm ? 'Đóng biểu mẫu' : '+ Thêm địa chỉ mới'}</button><Link href="/profile" className="text-slate-500">Quản lý sổ địa chỉ</Link></div>
+      {showAddressForm && <div className="space-y-3 rounded-lg border bg-white p-3"><h3 className="text-sm font-semibold">Địa chỉ giao hàng mới</h3>
+        {([['label', 'Tên địa chỉ', false], ['recipient', 'Người nhận', true], ['phone', 'Số điện thoại', true], ['line1', 'Số nhà, đường', true], ['ward', 'Phường/xã', false], ['district', 'Quận/huyện', false], ['city', 'Tỉnh/thành phố', true]] as const).map(([key, label, required]) => <label key={key} className="block text-xs">{label}<input className={field} required={required} value={addressDraft[key] || ''} onChange={event => setAddressDraft(current => ({ ...current, [key]: event.target.value }))}/></label>)}
+        <button type="button" className={button} disabled={savingAddress} onClick={() => void saveAddress()}>{savingAddress ? 'Đang lưu…' : 'Lưu và chọn địa chỉ'}</button>
+      </div>}
+    </div>}
     <label className="block text-sm">Khung giao hàng<select className={field} value={slotId} onChange={event => setSlotId(Number(event.target.value))}><option value={0}>Không chọn khung giao</option>{slots.map(slot => <option key={slot.id} value={slot.id}>{slot.name} · {money(Number(slot.fee))}</option>)}</select></label>
     <label className="block text-sm">Ghi chú<textarea className={field} value={note} onChange={event => setNote(event.target.value)} maxLength={300}/></label>
     <p className="text-sm">Tạm tính: {money(total)} · Phí theo khung giao: {money(fee)}</p><p className="font-bold">Tổng dự kiến: {money(total + fee)}</p>

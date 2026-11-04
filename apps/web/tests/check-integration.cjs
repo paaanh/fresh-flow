@@ -72,9 +72,6 @@ async function main() {
     ['PATCH', '/admin/product-requests/6', () => f.respondRequest(6, { status: 'QUOTED', quoted_price: 12000 })],
     ['GET', '/notifications', () => f.notifications()],
     ['PATCH', '/notifications/1/read', () => f.readNotification(1)],
-    ['POST', '/conversations', () => f.createConversation(7)],
-    ['GET', '/conversations/9/messages', () => f.messages(9)],
-    ['POST', '/conversations/9/messages', () => f.sendMessage(9, 'hello')],
     ['POST', '/admin/moderation/terms?term=test+term', () => f.addModerationTerm('test term')],
     ['GET', '/admin/reports/summary?date_from=2026-10-01T00%3A00%3A00Z&date_to=2026-11-01T00%3A00%3A00Z', () => f.report('2026-10-01T00:00:00Z', '2026-11-01T00:00:00Z')],
     ['GET', '/admin/audit-logs?limit=100', () => f.auditLogs()],
@@ -89,7 +86,6 @@ async function main() {
   }
   const body = path => JSON.parse(h.calls.find(call => new URL(call.url).pathname.endsWith(path) && call.body)?.body);
   assert.deepEqual(body('/admin/products'), product);
-  assert.deepEqual(body('/conversations/9/messages'), { body: 'hello' });
   assert.deepEqual(body('/admin/products/3/prices/STUDENT'), { customer_group: 'STUDENT', unit_price: 12000 });
   assert.equal(body('/orders').items[0].batch_id, 4);
   assert.equal(body('/admin/orders/5/status').status, 'APPROVED');

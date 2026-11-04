@@ -14,7 +14,6 @@ Các sự kiện nên dùng JSON có `type`, `data` và thời điểm phát n�
 |---|---|---|
 | Inventory/catalog | Số lượng khả dụng hoặc sản phẩm thay đổi | Danh sách sản phẩm/catalog |
 | Orders | Trạng thái đơn thay đổi | Chi tiết đơn và lịch sử |
-| Chat | Có tin nhắn mới | Danh sách tin nhắn hội thoại |
 | Notifications | Có thông báo hoặc trạng thái đọc đổi | Danh sách thông báo |
 
 Tên event và schema cụ thể cần được đồng bộ với `packages/contracts/api-contract.md` và mã backend. Tài liệu này không giả định event type chưa được xác nhận trong triển khai.

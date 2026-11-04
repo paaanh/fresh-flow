@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-Mở `http://localhost:3000/login` để đăng nhập backend thật. Các màn hình dùng route dạng `/dashboard`, `/products`, `/products/{id}`, `/orders`, `/orders/{id}`, `/inventory`, `/deliveries`, `/customers`, `/requests`, `/chat`, `/notifications`, `/profile`, `/reports`, `/pricing`, `/audit-logs`, `/moderation`, `/settings`, `/cart` và `/checkout`. Khi chưa đăng nhập, giao diện sử dụng chế độ xem trước và cho phép đổi vai trò tại sidebar. Đăng ký tại `/register`; OTP và khôi phục mật khẩu chưa có API trong tài liệu.
+Mở `http://localhost:3000/login` để đăng nhập backend thật. Các màn hình dùng route dạng `/dashboard`, `/products`, `/products/{id}`, `/orders`, `/orders/{id}`, `/inventory`, `/deliveries`, `/customers`, `/requests`, `/notifications`, `/profile`, `/reports`, `/pricing`, `/audit-logs`, `/moderation`, `/settings`, `/cart` và `/checkout`. Khi chưa đăng nhập, giao diện sử dụng chế độ xem trước và cho phép đổi vai trò tại sidebar. Đăng ký tại `/register`; OTP và khôi phục mật khẩu chưa có API trong tài liệu.
 
 ## Cấu hình API
 

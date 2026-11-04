@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_admin
 from app.models import User
-from app.schemas import BatchIn
+from app.schemas import BatchIn, InventoryAdjustmentIn
 from app.modules.inventory import service
 
 router = APIRouter()
@@ -17,3 +17,8 @@ async def create_batch(product_id: int, payload: BatchIn, db: Session = Depends(
 @router.get("/admin/products/{product_id}/batches")
 def list_batches(product_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
     return service.list_batches(db, product_id)
+
+
+@router.post("/admin/products/{product_id}/adjustments")
+async def remove_stock(product_id: int, payload: InventoryAdjustmentIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    return await service.remove_stock(db, product_id, payload.quantity, admin)

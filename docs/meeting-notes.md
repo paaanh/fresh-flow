@@ -46,7 +46,6 @@
 ### Người 2 — Frontend khách hàng
 
 - Phụ trách giao diện trong `apps/web/src/app/(public)` và `apps/web/src/app/(customer)`: trang giới thiệu/đăng nhập, trang khách hàng, hồ sơ và các luồng mua hàng.
-- Theo phạm vi README, triển khai lần lượt: đăng nhập/đăng ký theo khả năng backend; danh mục và chi tiết sản phẩm; giá theo nhóm; giỏ hàng/đặt đơn nhiều mặt hàng; lịch sử/trạng thái đơn; quản lý tối đa ba địa chỉ; yêu cầu mặt hàng; thông báo; chat nếu backend đã có.
 - Tập trung trước vào luồng MVP: xem sản phẩm/tồn kho → gửi đơn → theo dõi đơn và nhận cập nhật. Những màn hình phụ chỉ làm sau khi luồng này tích hợp ổn định.
 - Tích hợp API backend theo hợp đồng thống nhất; không tự quyết định giá cuối, quyền truy cập hay tồn kho có thẩm quyền.
 - Kết nối WebSocket để hiển thị cập nhật tồn kho/trạng thái đơn; có trạng thái đang kết nối, mất kết nối, reconnect và tải lại dữ liệu chuẩn.
@@ -59,7 +58,6 @@
 ### Người 3 — Frontend quản trị
 
 - Phụ trách giao diện trong `apps/web/src/app/admin`: dashboard, điều hướng quản trị và các màn hình theo vai trò admin.
-- Theo phạm vi README, triển khai lần lượt: danh mục/sản phẩm/đơn vị tính; đợt hàng và tồn kho; giá/phí theo nhóm; tài khoản khách hàng; duyệt đơn và giao hàng; yêu cầu mặt hàng; thông báo; chat/cảnh báo kiểm duyệt; báo cáo ngày/tháng nếu backend hỗ trợ.
 - Tập trung trước vào luồng MVP: tạo/cập nhật sản phẩm và lượng hàng → nhận danh sách đơn → duyệt/từ chối → theo dõi trạng thái giao.
 - Tích hợp API và WebSocket theo cùng hợp đồng với người 2; giao diện không tự xác nhận thao tác nếu backend trả lỗi.
 - Hiển thị rõ số lượng ban đầu, đã duyệt, đang chờ và khả dụng theo dữ liệu backend; thêm xác nhận cho thao tác quản trị quan trọng.
@@ -72,13 +70,11 @@
 ### Người 4 — Backend và giao tiếp mạng
 
 - Khởi tạo FastAPI theo cấu trúc modular monolith trong README; cấu hình môi trường, health check, logging và định dạng lỗi nhất quán.
-- Thiết kế MySQL/SQLAlchemy/Alembic và API theo module README: auth/users/roles, customer groups/addresses, catalog/inventory/pricing, orders/delivery, product requests, chat/notifications/moderation/reports/audit logs. Triển khai theo ưu tiên bên dưới, không cần giả vờ mọi module đều hoàn thành cùng lúc.
 - Với MVP, hoàn thiện trước API danh mục/sản phẩm, tồn kho theo đợt, giá cơ bản, tạo đơn nhiều mặt hàng, danh sách đơn và thao tác duyệt/từ chối/cập nhật trạng thái.
 - Triển khai WebSocket có quản lý kết nối/phòng hoặc nhóm phát sự kiện phù hợp; xác thực/phân quyền sự kiện, xử lý disconnect và phát sự kiện sau khi thay đổi dữ liệu thành công.
 - Bảo đảm nghiệp vụ duyệt đơn không duyệt vượt tồn kho khi nhiều yêu cầu cạnh tranh: transaction và khóa/cập nhật có điều kiện ở database; không dựa vào kiểm tra phía trình duyệt.
 - Tính giá/phí ở backend và lưu snapshot tại thời điểm đặt; lưu lịch sử trạng thái. Chốt công thức khả dụng/đặt chờ duyệt cùng nhóm, thể hiện rõ trong API và README.
 - Bảo vệ quyền truy cập theo vai trò/tài nguyên; kiểm tra đầu vào, unique constraint, tiền dạng decimal, giới hạn địa chỉ; không ghi mật khẩu/OTP/token ra log. OTP/SMS thật cần nhà cung cấp nên chỉ cấu hình interface/mock nếu chưa có dịch vụ.
-- Nếu mở rộng chat/ảnh, kiểm tra thành viên hội thoại, lưu tin nhắn trước khi báo thành công và giới hạn metadata/file; không nhận ảnh tùy tiện nếu chưa có lưu trữ an toàn. Nếu làm kiểm duyệt, lưu vi phạm và phát cảnh báo theo quyền.
 - Cung cấp dữ liệu mẫu và cấu hình chạy local/Docker; viết kiểm tra API/nghiệp vụ cho luồng quan trọng và kịch bản nhiều request/kết nối.
 - Công bố hợp đồng API/WebSocket sớm cho người 2–3, thông báo thay đổi trước khi merge và phối hợp xử lý tích hợp.
 
@@ -95,7 +91,6 @@ README mô tả toàn bộ sản phẩm mục tiêu; các giai đoạn dưới �
 | 3 — Tài khoản, quyền | Người 4; UI người 2/3 | MVP có đăng nhập/role cơ bản nếu đủ thời gian. Mở rộng sau: OTP thật, rate limit, khôi phục tài khoản, khóa/mở, audit, hồ sơ và tối đa 3 địa chỉ. Không tuyên bố OTP SMS thật khi chưa nối nhà cung cấp. |
 | 4 — Sản phẩm, giá, tồn | Người 4 và người 3; hiển thị người 2 | CRUD danh mục/sản phẩm/đơn vị, đợt hàng theo ngày, nhóm khách, giá/phí; khách xem đúng giá và lượng khả dụng. Backend là nguồn quyết định; lưu snapshot giá khi tạo đơn. |
 | 5 — Đơn, giao hàng | Người 4; màn hình người 2/3 | Giỏ/đơn nhiều sản phẩm, chờ duyệt, duyệt/từ chối, transaction tồn kho, lịch sử trạng thái, điểm/khung giờ giao. Quy tắc hủy/hoàn kho phải được định nghĩa trước khi triển khai. |
-| 6 — Realtime, thông báo, chat | Người 4; khách/admin người 2/3; đặc tả người 1 | WebSocket xác thực, `connection.ready`, `inventory.updated`, `order.status_changed`; client reconnect và tải lại trạng thái chuẩn. Mở rộng notification/chat/moderation sau MVP; kiểm tra quyền phòng/hội thoại. |
 | 7 — Yêu cầu hàng, báo cáo | Người 4 API; admin người 3; khách người 2; người 1 đặc tả/đối chiếu | Tạo/theo dõi yêu cầu, admin phản hồi; báo cáo ngày/tháng đối chiếu được với đơn. Định nghĩa doanh thu trước khi đưa số liệu lên giao diện/báo cáo. |
 | 8 — Kiểm tra, triển khai, nghiệm thu | Cả nhóm; người 1 tổng hợp | Unit/integration/browser checks, kiểm tra lỗi và quyền, thử nhiều client, ghi cấu hình máy và số liệu thực. Hướng dẫn cài đặt, backup/restore nếu có DB cần bàn giao; chỉ nêu kết quả đã kiểm chứng. |
 
@@ -104,8 +99,6 @@ README mô tả toàn bộ sản phẩm mục tiêu; các giai đoạn dưới �
 | Module trong README | Owner | Phối hợp / lưu ý |
 |---|---|---|
 | Báo cáo, tài liệu, kiến trúc, API/event diagrams, test plan, kết quả | Người 1 | Các thành viên kỹ thuật cung cấp sơ đồ/code path, ảnh và log; người 1 không tự suy diễn tính năng. |
-| Khu khách hàng: auth UI, hồ sơ/địa chỉ, catalog, giá, giỏ/đơn, product requests, notifications, chat | Người 2 | Backend người 4 cung cấp API; làm theo ưu tiên MVP; không tự quyết định giá/tồn/quyền. |
-| Khu admin: dashboard, catalog/inventory/pricing UI, users, orders/delivery, product requests, moderation, reports, notifications/chat | Người 3 | Backend người 4 cung cấp API; triển khai từng màn hình theo module đã có API. |
 | Backend modules, database/migrations, API, authorization, REST/WebSocket, nghiệp vụ, event publishing | Người 4 | Người 2/3 tích hợp; người 1 ghi lại protocol và thực nghiệm. |
 
 ## 4. Phạm vi MVP để chia việc không chồng chéo
@@ -119,7 +112,6 @@ README mô tả toàn bộ sản phẩm mục tiêu; các giai đoạn dưới �
 5. Các client đang mở nhận thay đổi tồn kho/trạng thái qua WebSocket; client kết nối lại tải trạng thái hiện tại.
 6. Có xử lý lỗi đầu vào, lỗi nghiệp vụ, lỗi kết nối và database; có kịch bản đo/ghi nhận hoạt động nhiều client.
 
-Đăng ký OTP SMS, thanh toán, chat/ảnh, triển khai production, kiểm thử tải 1.000–2.000 người đồng thời và các module phụ chỉ đưa vào khi luồng MVP hoàn thành và có đủ thời gian. Không mô tả các mục này như tính năng đã hoàn tất nếu chưa triển khai/đo kiểm. Novelty cần thống nhất và chứng minh bằng code/kết quả, ví dụ cơ chế đồng bộ trạng thái đa client và xử lý duyệt đơn cạnh tranh an toàn.
 
 ## 5. Quy tắc phối hợp và tích hợp
 

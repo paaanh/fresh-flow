@@ -31,3 +31,12 @@ def lock_batches(db: Session, batch_ids: list[int]):
 
 def open_batches_for_product(db: Session, product_id: int):
     return db.scalars(select(InventoryBatch).where(InventoryBatch.product_id == product_id, InventoryBatch.is_open.is_(True))).all()
+
+
+def lock_open_batches_for_product(db: Session, product_id: int):
+    return db.scalars(
+        select(InventoryBatch)
+        .where(InventoryBatch.product_id == product_id, InventoryBatch.is_open.is_(True))
+        .order_by(InventoryBatch.batch_date, InventoryBatch.id)
+        .with_for_update()
+    ).all()

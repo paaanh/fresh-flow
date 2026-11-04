@@ -102,10 +102,10 @@ Tất cả REST endpoint nằm dưới `/api/v1`. Các endpoint `/admin/*` yêu 
 | Admin đơn/giao | `PATCH /admin/orders/{id}/status`, `GET /orders/{id}/history`, `POST /admin/delivery-slots` |
 | Yêu cầu mặt hàng | `POST/GET /product-requests`, `PATCH /admin/product-requests/{id}` |
 | Realtime/thông báo | `WS /api/v1/ws?token={access_token}`, `GET /notifications`, `PATCH /notifications/{id}/read` |
-| Chat/kiểm duyệt | `POST /conversations`, `GET/POST /conversations/{id}/messages`, `POST /admin/moderation/terms` |
+| Ki?m duy?t | `POST /admin/moderation/terms` |
 | Báo cáo/quản trị | `GET /admin/reports/summary`, `GET /admin/users`, `GET /admin/audit-logs` |
 
-WebSocket server events có envelope `{event_id, type, occurred_at, data}`. Sự kiện chính: `connection.ready`, `inventory.updated`, `order.status_changed`, `notification.created`, `chat.message_created`.
+WebSocket server events có envelope `{event_id, type, occurred_at, data}`. Sự kiện chính: `connection.ready`, `inventory.updated`, `order.status_changed`, `notification.created`.
 
 ## Nghiệp vụ đơn và tồn kho
 
@@ -117,7 +117,7 @@ WebSocket server events có envelope `{event_id, type, occurred_at, data}`. Sự
 
 ## Phạm vi và phần cần cấu hình thêm
 
-Đã có API nền cho catalog/tồn, giá, đơn, địa chỉ, role admin/customer, yêu cầu mặt hàng, thông báo, báo cáo, chat văn bản, kiểm duyệt từ khóa và audit log. Chưa có SMS/email provider, refresh-token/revoke session, rate-limit, upload ảnh/storage, transactional outbox, Redis pub/sub, đầy đủ workflow giao hàng, cấu hình backup hoặc kiểm thử tải production. Không công bố các khả năng này là đã triển khai. Kiểm thử race condition tồn kho phải chạy trên MySQL và cần được thực hiện trước khi nghiệm thu.
+Đã có API nền cho catalog/tồn, giá, đơn, địa chỉ, role admin/customer, yêu cầu mặt hàng, thông báo, báo cáo, kiểm duyệt từ khóa và audit log. Chưa có SMS/email provider, refresh-token/revoke session, rate-limit, upload ảnh/storage, transactional outbox, Redis pub/sub, đầy đủ workflow giao hàng, cấu hình backup hoặc kiểm thử tải production. Không công bố các khả năng này là đã triển khai. Kiểm thử race condition tồn kho phải chạy trên MySQL và cần được thực hiện trước khi nghiệm thu.
 
 
 

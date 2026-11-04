@@ -65,6 +65,13 @@ class ProductUpdateIn(BaseModel):
     is_active: bool | None = None
 
 
+class CatalogBatchOut(BaseModel):
+    id: int
+    batch_date: datetime
+    is_open: bool
+    available_quantity: Decimal
+
+
 class ProductOut(BaseModel):
     id: int
     name: str
@@ -75,12 +82,17 @@ class ProductOut(BaseModel):
     base_price: Decimal
     is_active: bool
     available_quantity: Decimal = Decimal("0")
+    batches: list[CatalogBatchOut] = Field(default_factory=list)
 
 
 class BatchIn(BaseModel):
     batch_date: datetime
     initial_quantity: Decimal = Field(gt=0, decimal_places=3)
     is_open: bool = True
+
+
+class InventoryAdjustmentIn(BaseModel):
+    quantity: Decimal = Field(gt=0, decimal_places=3)
 
 
 class BatchOut(ORMModel):
@@ -177,11 +189,3 @@ class NotificationOut(ORMModel):
     event_type: str
     is_read: bool
     created_at: datetime
-
-
-class MessageIn(BaseModel):
-    body: str = Field(min_length=1, max_length=4000)
-
-
-class ConversationIn(BaseModel):
-    participant_id: int | None = None

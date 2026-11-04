@@ -55,7 +55,7 @@ export function unwrapList<T>(payload: ApiEnvelope<T>): T[] {
 export const endpoints = {
   products: '/products', orders: '/orders', categories: '/categories',
   notifications: '/notifications', addresses: '/addresses', profile: '/auth/me',
-  requests: '/product-requests', conversations: '/conversations', customers: '/admin/users',
+  requests: '/product-requests', customers: '/admin/users',
   reports: '/admin/reports/summary', auditLogs: '/admin/audit-logs', deliverySlots: '/delivery-slots',
 };
 
@@ -98,6 +98,7 @@ export const freshflow = {
   deleteProduct: (id: number) => api.delete<void>(`/admin/products/${id}`),
   batches: (id: number) => api.get<BatchOut[]>(`/admin/products/${id}/batches`),
   createBatch: (id: number, body: { batch_date: string; initial_quantity: number; is_open?: boolean }) => api.post<BatchOut>(`/admin/products/${id}/batches`, body),
+  removeStock: (id: number, quantity: number) => api.post<{ product_id: number; removed_quantity: number; available_quantity: number }>(`/admin/products/${id}/adjustments`, { quantity }),
   price: <T>(id: number, customer_group: CustomerGroup, unit_price: number) => api.put<T>(`/admin/products/${id}/prices/${customer_group}`, { customer_group, unit_price }),
   deliverySlots: <T>() => api.get<T[]>('/delivery-slots'),
   createDeliverySlot: <T>(body: { name: string; customer_group?: CustomerGroup | 'ALL'; fee: number; is_active?: boolean }) => api.post<T>('/admin/delivery-slots', body),
@@ -111,9 +112,6 @@ export const freshflow = {
   respondRequest: <T>(id: number, body: { status: 'QUOTED' | 'ACCEPTED' | 'REJECTED' | 'FULFILLED'; admin_response?: string; quoted_price?: number }) => api.patch<T>(`/admin/product-requests/${id}`, body),
   notifications: <T>() => api.get<T[]>('/notifications'),
   readNotification: (id: number) => api.patch<void>(`/notifications/${id}/read`, undefined),
-  createConversation: <T>(participant_id?: number) => api.post<T>('/conversations', { participant_id }),
-  messages: <T>(id: number) => api.get<T[]>(`/conversations/${id}/messages`),
-  sendMessage: <T>(id: number, body: string) => api.post<T>(`/conversations/${id}/messages`, { body }),
   addModerationTerm: <T>(term: string) => api.post<T>(`/admin/moderation/terms${query({ term })}`),
   report: <T>(date_from: string, date_to: string) => api.get<T>(`/admin/reports/summary${query({ date_from, date_to })}`),
   auditLogs: <T>(limit = 100) => api.get<T[]>(`/admin/audit-logs${query({ limit })}`),

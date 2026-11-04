@@ -11,11 +11,8 @@ from app.models import (
     Address,
     AuditLog,
     Category,
-    Conversation,
-    ConversationMember,
     DeliverySlot,
     InventoryBatch,
-    Message,
     ModerationTerm,
     Notification,
     Order,
@@ -232,43 +229,6 @@ def ensure_notification(db, user: User, title: str, body: str, event_type: str, 
         ))
 
 
-def ensure_conversation(db, admin: User, customer: User) -> Conversation:
-    for conversation in db.scalars(select(Conversation)).all():
-        member_ids = set(db.scalars(
-            select(ConversationMember.user_id).where(
-                ConversationMember.conversation_id == conversation.id
-            )
-        ).all())
-        if member_ids == {admin.id, customer.id}:
-            return conversation
-    conversation = Conversation()
-    db.add(conversation)
-    db.flush()
-    db.add_all([
-        ConversationMember(conversation_id=conversation.id, user_id=admin.id),
-        ConversationMember(conversation_id=conversation.id, user_id=customer.id),
-    ])
-    db.flush()
-    return conversation
-
-
-def ensure_message(db, conversation: Conversation, sender: User, body: str, created_at: datetime) -> None:
-    existing = db.scalar(
-        select(Message).where(
-            Message.conversation_id == conversation.id,
-            Message.sender_id == sender.id,
-            Message.body == body,
-        )
-    )
-    if existing is None:
-        db.add(Message(
-            conversation_id=conversation.id,
-            sender_id=sender.id,
-            body=body,
-            created_at=created_at,
-        ))
-
-
 def ensure_moderation_term(db, term: str) -> None:
     existing = db.scalar(select(ModerationTerm).where(ModerationTerm.term == term))
     if existing is None:
@@ -333,9 +293,6 @@ def main() -> None:
         ensure_notification(db, worker, "Đơn hàng đang chuẩn bị", "Đơn FF-DEMO-PREPARING-01 đang được chuẩn bị.", "order.status_changed")
         ensure_moderation_term(db, "spam-demo")
 
-        conversation = ensure_conversation(db, admin, student)
-        ensure_message(db, conversation, student, "Chào shop, rau kale hôm nay còn hàng không?", now - timedelta(minutes=30))
-        ensure_message(db, conversation, admin, "Chào bạn, shop vẫn còn hàng nhé.", now - timedelta(minutes=25))
         ensure_audit(db, admin, "demo.seeded", "workspace", "local", "Bộ dữ liệu demo FreshFlow")
 
         db.commit()

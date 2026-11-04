@@ -160,29 +160,6 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
-class Conversation(Base):
-    __tablename__ = "conversations"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class ConversationMember(Base):
-    __tablename__ = "conversation_members"
-    __table_args__ = (UniqueConstraint("conversation_id", "user_id", name="uq_conversation_member"),)
-    id: Mapped[int] = mapped_column(primary_key=True)
-    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-
-
-class Message(Base):
-    __tablename__ = "messages"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
-    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    body: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
 class ModerationTerm(Base):
     __tablename__ = "moderation_terms"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -194,7 +171,6 @@ class ModerationViolation(Base):
     __tablename__ = "moderation_violations"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    conversation_id: Mapped[int | None] = mapped_column(ForeignKey("conversations.id"), nullable=True)
     matched_term: Mapped[str] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

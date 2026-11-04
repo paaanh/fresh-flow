@@ -4,7 +4,7 @@ Tài liệu tóm tắt phạm vi sản phẩm hiện tại. Đối chiếu thêm
 
 ## Vai trò
 
-- **Khách hàng:** đăng ký/đăng nhập, xem catalog và lượng hàng, quản lý địa chỉ, đặt và theo dõi đơn, gửi yêu cầu mặt hàng, chat, nhận thông báo.
+- **Khách hàng:** đăng ký/đăng nhập, xem catalog và lượng hàng, quản lý địa chỉ, đặt và theo dõi đơn, gửi yêu cầu mặt hàng, nhận thông báo.
 - **Quản trị viên:** quản lý người dùng, danh mục, sản phẩm, đợt hàng, giá, khung giao hàng, đơn, yêu cầu mặt hàng, kiểm duyệt và báo cáo.
 
 ## Yêu cầu chức năng

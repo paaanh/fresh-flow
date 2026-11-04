@@ -40,7 +40,6 @@ Có thể bỏ `NEXT_PUBLIC_WS_URL` để suy ra từ REST base. Dùng `https://
 | Danh sách cho admin | Dùng `GET /orders` và `GET /product-requests` | Xác nhận hai endpoint này trả toàn bộ dữ liệu được admin phép xem hay chỉ dữ liệu của tài khoản đang đăng nhập. Tài liệu chưa nói rõ phạm vi theo role. |
 | Báo cáo | Gửi ISO `date_from`, `date_to`, tính theo tháng ở Việt Nam; cuối kỳ là mili giây cuối tháng | Xác nhận cách so sánh giới hạn cuối kỳ và JSON tổng hợp. Frontend đọc `revenue`/`total_revenue`, `completed_orders`/`orders_completed`, `average_order_value`, `completion_rate`. |
 | Tồn kho | `available_quantity` được hỗ trợ; nhập thêm tạo một batch mới, không giảm kho qua API giả | Tổng đã duyệt/chờ duyệt chỉ chính xác nếu response bổ sung `approved_quantity`/`pending_quantity`; tài liệu `ProductOut` chưa bảo đảm hai field này. |
-| Hội thoại | Tạo hội thoại, mở bằng ID, tải/gửi tin JSON và tải lại khi nhận event | Chưa có API liệt kê hội thoại. Backend cần cung cấp ID hội thoại khi kiểm thử hoặc thêm API danh sách. Không có upload ảnh chat. |
 | Giá đã lưu và từ khóa cũ | Có PUT giá theo nhóm và POST từ khóa; không giả lập GET giá/từ khóa | Chưa có GET price rules, GET/DELETE moderation terms. Màn hình giá live chỉ gửi các ô vừa nhập, không ghi đè bằng giá demo. |
 | Màn hình còn thiếu API | OTP, quên mật khẩu, sửa hồ sơ, cấu hình cửa hàng, broadcast, xử lý cảnh báo kiểm duyệt | Các thao tác live báo chưa hỗ trợ. Cần bổ sung hợp đồng trước khi nối. |
 
@@ -72,7 +71,7 @@ Ví dụ phần mở rộng catalog để hai bên thống nhất (chưa đượ
 8. Tạo yêu cầu mặt hàng, admin chuyển `QUOTED`; tải lại và kiểm tra trạng thái. Category/số lượng/ghi chú được gộp trong `description` vì input gốc chỉ có `product_name`, `description`.
 9. Thông báo chỉ hiển thị chưa đọc; đánh dấu đọc gọi từng `/notifications/{id}/read`. Kiểm tra không xuất hiện lại sau khi tải trang.
 10. Tạo/mở hội thoại bằng ID, gửi tin văn bản; kiểm tra quyền người tham gia và realtime giữa hai phiên. Lỗi gửi phải giữ lại bản nháp.
-11. Kiểm tra WebSocket `inventory.updated`, `order.status_changed`, `notification.created`, `chat.message_created`; ngắt/kết nối lại để kiểm tra đồng bộ. Payload event chi tiết chưa có schema nên frontend tải lại danh sách qua REST.
+11. Kiểm tra WebSocket `inventory.updated`, `order.status_changed`, `notification.created`; ngắt/kết nối lại để kiểm tra đồng bộ. Payload event chi tiết chưa có schema nên frontend tải lại danh sách qua REST.
 12. Báo cáo tháng và audit log: thử có dữ liệu, rỗng, lỗi API. Khi lỗi không dùng số liệu demo gắn nhãn backend. Biểu đồ doanh thu theo ngày vẫn ghi rõ là minh họa do chưa có API chuỗi ngày.
 13. Dùng token khách gọi trực tiếp admin API phải bị backend từ chối. Các số liệu dashboard live là số liệu trong danh sách đã tải, không mặc định coi là báo cáo toàn hệ thống.
 
