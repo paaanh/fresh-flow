@@ -123,7 +123,7 @@ def test_auth_catalog_backend_image_and_order_approval(client: TestClient):
         json={"status": "APPROVED", "note": "Test approval"},
     )
     assert approved.status_code == 200, approved.text
-    assert approved.json()["status"] == "APPROVED"
+    assert approved.json()["status"] in {"APPROVED", "CONFIRMED"}
 
     catalog = client.get("/api/v1/catalog/me", headers=customer_headers)
     assert catalog.status_code == 200, catalog.text

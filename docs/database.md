@@ -357,3 +357,96 @@ inventory_batches 1--N order_items
 - Endpoint `/admin/*` yêu cầu role `ADMIN`.
 - Không đưa file database `freshflow.db` hoặc dữ liệu thật vào tài liệu gửi ra ngoài nếu không cần thiết; file này chỉ chứa cấu trúc và hợp đồng API.
 - Migration hiện tại: `0001_initial`.
+
+
+## 5. Nâng cấp toàn diện hệ thống (RBAC, Newfeed, VAT, Giao nhận, Reviews, Chat)
+
+### 5.1. Bảng cấu hình VAT và Lịch sử
+
+#### `vat_configs`
+| Cột | Kiểu | Ràng buộc / mặc định |
+|---|---|---|
+| `id` | INTEGER | PK |
+| `tax_name` | VARCHAR(100) | NOT NULL, mặc định `VAT` |
+| `rate` | NUMERIC(5,4) | NOT NULL, mặc định `0.0800` (8%) |
+| `category_id` | INTEGER | NULL, FK `categories.id` |
+| `is_active` | BOOLEAN | NOT NULL, mặc định `true` |
+| `updated_at` | DATETIME WITH TIME ZONE | NOT NULL |
+| `updated_by` | INTEGER | NULL, FK `users.id` |
+
+#### `vat_history`
+| Cột | Kiểu | Ràng buộc / mặc định |
+|---|---|---|
+| `id` | INTEGER | PK |
+| `vat_config_id` | INTEGER | FK `vat_configs.id` |
+| `old_rate` | NUMERIC(5,4) | NOT NULL |
+| `new_rate` | NUMERIC(5,4) | NOT NULL |
+| `changed_by` | INTEGER | FK `users.id` |
+| `note` | TEXT | NOT NULL, mặc định rỗng |
+| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
+
+### 5.2. Bảng Bài đăng & Newfeed
+
+#### `posts`
+| Cột | Kiểu | Ràng buộc / mặc định |
+|---|---|---|
+| `id` | INTEGER | PK |
+| `author_id` | INTEGER | FK `users.id`, index |
+| `title` | VARCHAR(200) | NOT NULL |
+| `content` | TEXT | NOT NULL |
+| `post_type` | VARCHAR(50) | NOT NULL, mặc định `PRODUCT_INTRO` |
+| `product_id` | INTEGER | NULL, FK `products.id` |
+| `image_urls` | TEXT | NOT NULL, mặc định rỗng |
+| `quantity_limit` | NUMERIC(12,3) | NULL |
+| `target_audience` | VARCHAR(50) | NOT NULL, mặc định `ALL` |
+| `target_customer_group` | VARCHAR(50) | NULL |
+| `sale_price` | NUMERIC(12,2) | NULL |
+| `group_prices` | TEXT | NOT NULL, mặc định rỗng (JSON giá theo nhóm) |
+| `order_start_at` | DATETIME WITH TIME ZONE | NULL |
+| `order_end_at` | DATETIME WITH TIME ZONE | NULL |
+| `delivery_time_text` | VARCHAR(100) | NOT NULL, mặc định rỗng |
+| `is_active` | BOOLEAN | NOT NULL, mặc định `true` |
+| `created_at` | DATETIME WITH TIME ZONE | NOT NULL, index |
+
+### 5.3. Bảng Đánh giá & Reviews
+
+#### `product_reviews`
+| Cột | Kiểu | Ràng buộc / mặc định |
+|---|---|---|
+| `id` | INTEGER | PK |
+| `product_id` | INTEGER | FK `products.id`, index |
+| `user_id` | INTEGER | FK `users.id`, index |
+| `order_id` | INTEGER | NULL, FK `orders.id` |
+| `rating` | INTEGER | NOT NULL (1 đến 5 sao) |
+| `comment` | TEXT | NOT NULL |
+| `images` | TEXT | NOT NULL, mặc định rỗng |
+| `shop_reply` | TEXT | NOT NULL, mặc định rỗng |
+| `is_hidden` | BOOLEAN | NOT NULL, mặc định `false` |
+| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
+
+#### `shipper_reviews`
+| Cột | Kiểu | Ràng buộc / mặc định |
+|---|---|---|
+| `id` | INTEGER | PK |
+| `shipper_id` | INTEGER | FK `users.id`, index |
+| `user_id` | INTEGER | FK `users.id`, index |
+| `order_id` | INTEGER | FK `orders.id`, index |
+| `rating` | INTEGER | NOT NULL (1 đến 5 sao) |
+| `attitude_rating` | INTEGER | NOT NULL, mặc định `5` |
+| `speed_rating` | INTEGER | NOT NULL, mặc định `5` |
+| `comment` | TEXT | NOT NULL |
+| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
+
+### 5.4. Bảng Chat Realtime
+
+#### `chat_messages`
+| Cột | Kiểu | Ràng buộc / mặc định |
+|---|---|---|
+| `id` | INTEGER | PK |
+| `sender_id` | INTEGER | FK `users.id`, index |
+| `receiver_id` | INTEGER | NULL, FK `users.id`, index |
+| `order_id` | INTEGER | NULL, FK `orders.id`, index |
+| `content` | TEXT | NOT NULL |
+| `image_url` | VARCHAR(500) | NULL |
+| `is_read` | BOOLEAN | NOT NULL, mặc định `false` |
+| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |

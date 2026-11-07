@@ -8,13 +8,23 @@ from sqlalchemy.orm import Session
 from app.realtime import event, manager
 
 
+def _owned_product(db: Session, product_id: int, operator: User) -> Product:
+    product = db.get(Product, product_id)
+    if not product:
+        raise HTTPException(404, 'Không tìm thấy sản phẩm')
+    if operator.role == 'SHOP' and product.shop_id not in (None, operator.id):
+        raise HTTPException(403, 'Bạn không có quyền quản lý tồn kho của Shop khác')
+    if operator.role == 'SHOP' and product.shop_id is None:
+        product.shop_id = operator.id
+    return product
+
+
 def close_batches_for_product(db: Session, product_id: int) -> None:
     repository.close_for_product(db, product_id)
 
 
 async def create_batch(db: Session, product_id: int, payload: BatchIn, admin: User):
-    if not db.get(Product, product_id):
-        raise HTTPException(404, 'Không tìm thấy sản phẩm')
+    _owned_product(db, product_id, admin)
 
     batch = InventoryBatch(product_id=product_id, **payload.model_dump())
     db.add(batch)
@@ -40,8 +50,7 @@ def list_batches(db: Session, product_id: int):
 
 
 async def remove_stock(db: Session, product_id: int, quantity: Decimal, admin: User):
-    if not db.get(Product, product_id):
-        raise HTTPException(404, 'Không tìm thấy sản phẩm')
+    _owned_product(db, product_id, admin)
 
     batches = repository.lock_open_batches_for_product(db, product_id)
     remaining = quantity

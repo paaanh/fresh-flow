@@ -1,9 +1,11 @@
 from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.audit import write_audit
 from app.models import User
+from app.schemas import ProfileUpdateIn
 
 
 def admin_users(search: str | None=None, db: Session=None, _: User=None):
@@ -30,3 +32,29 @@ def update_user_status(user_id: int, is_active: bool, db: Session=None, admin: U
 def get_active_user(db: Session, user_id: int) -> User | None:
     user = db.get(User, user_id)
     return user if user is not None and user.is_active else None
+
+
+def update_profile(payload: ProfileUpdateIn, db: Session, user: User) -> User:
+    fields = payload.model_dump(exclude_unset=True)
+    if user.role != "SHOP":
+        fields = {key: value for key, value in fields.items() if not key.startswith("shop_")}
+    if user.role != "SHIPPER":
+        fields.pop("vehicle_info", None)
+
+    if "full_name" in fields:
+        full_name = (fields["full_name"] or "").strip()
+        if len(full_name) < 2:
+            raise HTTPException(422, "Họ và tên phải có ít nhất 2 ký tự")
+        fields["full_name"] = full_name
+    if "phone" in fields and fields["phone"] is not None:
+        fields["phone"] = fields["phone"].strip() or None
+
+    for key, value in fields.items():
+        setattr(user, key, value.strip() if isinstance(value, str) else value)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Số điện thoại đã được sử dụng bởi tài khoản khác")
+    db.refresh(user)
+    return user

@@ -48,7 +48,7 @@ Tạo tài khoản admin trong một cửa sổ PowerShell khác:
 ```powershell
 cd apps/api
 $env:DATABASE_URL = "sqlite:///./freshflow.db"
-.\.venv\Scripts\python.exe -m app.seed_admin --email admin@example.com --name "FreshFlow Admin" --password "change-this-password"
+.\.venv\Scripts\python.exe -m app.create_admin --email admin@example.com --name "FreshFlow Admin"
 ```
 
 Đăng nhập qua `POST /api/v1/auth/login` trong Swagger để lấy access token; nhấn **Authorize** và nhập token để gọi API `/admin/*`.
@@ -71,8 +71,10 @@ Nếu tự tạo môi trường mới, đặt `DATABASE_URL=sqlite:///./freshflo
 Tạo tài khoản quản trị sau khi database đã migrate:
 
 ```bash
-python -m app.seed_admin --email admin@example.com --name "FreshFlow Admin" --password "change-this-password"
+python -m app.create_admin --email admin@example.com --name "FreshFlow Admin"
 ```
+
+Password will be requested through a hidden prompt. This command only bootstraps the first administrator.
 
 ## Cấu hình
 

@@ -1,189 +1,492 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  faArrowRight,
+  faBell,
+  faCheck,
+  faCircleQuestion,
+  faComments,
+  faMotorcycle,
+  faPlus,
+  faRightFromBracket,
+  faSeedling,
+  faShoppingCart,
+  faStar,
+  faStore,
+  faUser,
+  faUserGroup,
+} from '@fortawesome/free-solid-svg-icons';
+
 import { Badge, Button } from '@/features/customer/pages/shared-ui';
 import { ProductDetail, ProductGrid, ProductsPanel } from '@/features/customer/pages/catalog';
 import { OrderDetailView, OrderTable, OrdersView } from '@/features/customer/pages/orders';
 import { RequestsView } from '@/features/customer/pages/requests';
-import { ProfileConnected } from '@/features/customer/pages/profile';
 import { Help, GuidePage } from '@/features/customer/pages/help';
 import { Cart } from '@/features/customer/pages/cart';
 import { CheckoutPanel } from '@/features/customer/pages/checkout';
-import Link from 'next/link';
 import ProductPhoto from '@/components/product-photo';
 import GlobalSearch from '@/components/global-search';
-import { demoCustomers } from '@/lib/demo-customers';
-import ProductSearch from '@/components/product-search';
 import { normalizeSearch } from '@/lib/search';
-import ProductSalesRanking from '@/components/product-sales-ranking';
-import { salesMonth } from '@/lib/product-sales';
-import InventoryAdjustment, { type AdjustStock } from '@/components/inventory-adjustment';
-import ProductImageField from '@/components/product-image-field';
-import OrderItems, { normalizeOrderLines, type OrderLine } from '@/components/order-items';
-import OrderStatusControl, { type UpdateOrderStatus } from '@/components/order-status-control';
-import { usePathname, useRouter } from 'next/navigation';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { api, endpoints, unwrapList, freshflow, authToken } from '@/lib/api';
-import { allocateOrderItems, reportRange } from '@/lib/order-payload';
+import { api, unwrapList, freshflow, authToken } from '@/lib/api';
+import { allocateOrderItems } from '@/lib/order-payload';
 import { ApiProfile, ApiCheckout, ApiDashboard, type CheckoutDetails } from '@/features/api-panels';
 import { RealtimeClient } from '@/lib/realtime';
 import { usePersistentState } from '@/hooks/use-persistent-state';
-import type { Order, Product, ProductRequest } from '@/types/domain';
+import type {
+  Order,
+  Product,
+  ProductRequest,
+  Post,
+  VatConfig,
+  ProductReview,
+  ChatMessage,
+  Conversation,
+  FinancialSummary,
+  User as DomainUser,
+} from '@/types/domain';
 import HomePage from '@/features/home-page';
-import { faAppleWhole, faArrowRight, faBell, faBox, faBoxesStacked, faChartLine, faCheck, faChevronDown, faChevronRight, faCircleQuestion, faClipboardList, faCreditCard, faEllipsis, faEnvelope, faFilter, faGear, faHeart, faHouse, faMapMarkerAlt, faMessage, faMinus, faMotorcycle, faPlus, faRightFromBracket, faSeedling, faShoppingBasket, faShoppingCart, faSliders, faStar, faTruck, faUser, faUserGroup, faUsers, faXmark } from '@fortawesome/free-solid-svg-icons';
+import { InventoryView, Deliveries, CustomersView, ReportsPanel } from '@/features/admin/pages';
+import { adminSections, customerSections, defaultFinancialSummary, money, normalizeOrder, normalizeProduct, normalizeRequest, shipperSections, shopSections, titleMap, toApiOrderStatus } from '@/features/customer/page-model';
 
-const initialProducts: Product[] = [
-  { id: 1, name: 'Bơ sáp Đắk Lắk', category: 'Trái cây', unit: 'kg', price: 68000, available: 42, ordered: 18, approved: 36, color: '#e7eed6', image: '/images/avocado.jpg', tag: 'Bán chạy' },
-  { id: 2, name: 'Cà chua bi hữu cơ', category: 'Rau củ', unit: 'hộp 500g', price: 32000, available: 28, ordered: 12, approved: 22, color: '#fae5df', image: '/images/tomato.jpg' },
-  { id: 3, name: 'Chuối cau chín cây', category: 'Trái cây', unit: 'nải', price: 25000, available: 64, ordered: 9, approved: 31, color: '#f8edcf', image: '/images/banana.jpg', tag: 'Tươi mới' },
-  { id: 4, name: 'Rau cải kale', category: 'Rau củ', unit: 'bó', price: 38000, available: 7, ordered: 11, approved: 20, color: '#deebdf', image: '/images/kale.jpg', tag: 'Sắp hết' },
-  { id: 5, name: 'Dâu tây Đà Lạt', category: 'Trái cây', unit: 'hộp 250g', price: 59000, available: 19, ordered: 7, approved: 15, color: '#f5dfdf', image: '/images/strawberry.jpg' },
-  { id: 6, name: 'Trứng gà thả vườn', category: 'Thực phẩm', unit: 'vỉ 10 quả', price: 42000, available: 36, ordered: 14, approved: 29, color: '#f0e9dd', image: '/images/eggs.jpg' },
-];
-const initialOrders: Order[] = [
-  { id: 'FF-240918', customer: 'Nguyễn Ngọc Anh', date: 'Hôm nay, 09:42', total: 286000, status: 'Chờ duyệt', items: '4 sản phẩm', delivery: 'Điểm giao tập trung' },
-  { id: 'FF-240917', customer: 'Trần Hoàng Nam', date: 'Hôm nay, 09:18', total: 154000, status: 'Đang chuẩn bị', items: '2 sản phẩm', delivery: 'Giao riêng' },
-  { id: 'FF-240916', customer: 'Lê Thu Hà', date: 'Hôm nay, 08:56', total: 372000, status: 'Đang giao', items: '5 sản phẩm', delivery: 'Điểm giao tập trung' },
-  { id: 'FF-240915', customer: 'Phạm Quang Huy', date: 'Hôm qua, 17:24', total: 98000, status: 'Hoàn thành', items: '2 sản phẩm', delivery: 'Giao riêng' },
-  { id: 'FF-240914', customer: 'Đỗ Ngọc Linh', date: 'Hôm qua, 16:02', total: 218000, status: 'Chờ duyệt', items: '3 sản phẩm', delivery: 'Điểm giao tập trung' },
-];
-const initialRequests: ProductRequest[] = [
-  { id: 1, name: 'Táo xanh Granny Smith', category: 'Trái cây', quantity: '12 kg', customer: 'Nguyễn Minh Anh', date: 'Hôm nay, 09:12', status: 'Mới' },
-  { id: 2, name: 'Sữa hạt không đường', category: 'Thực phẩm', quantity: '8 hộp', customer: 'Trần Hoàng Nam', date: 'Hôm nay, 08:34', status: 'Đang xử lý' },
-  { id: 3, name: 'Nấm đùi gà hữu cơ', category: 'Rau củ', quantity: '5 kg', customer: 'Lê Thu Hà', date: 'Hôm qua, 16:20', status: 'Mới' },
-  { id: 4, name: 'Mật ong hoa cà phê', category: 'Thực phẩm', quantity: '3 chai', customer: 'Phạm Quang Huy', date: 'Hôm qua, 15:08', status: 'Đã báo giá' },
-];
-const money = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + '₫';
-function normalizeProduct(raw: any): Product {
-  const category = typeof raw.category === 'string' ? raw.category : raw.category?.name || raw.category_name || 'Rau củ';
-  return { id: Number(raw.id), name: raw.name || raw.product_name || 'Sản phẩm', category, unit: typeof raw.unit === 'string' ? raw.unit : raw.unit?.name || raw.unit_name || 'phần', price: Number(raw.customer_price ?? raw.price ?? raw.unit_price ?? raw.base_price ?? 0), available: Number(raw.available ?? raw.available_quantity ?? raw.quantity_available ?? 0), ordered: Number(raw.pending_quantity ?? raw.ordered ?? 0), approved: Number(raw.approved_quantity ?? raw.approved ?? 0), color: raw.color || '#e7eed6', image: raw.image_url || raw.image, tag: raw.tag };
-}
-function normalizeOrder(raw: any): Order {
-  const states: Record<string, string> = { PENDING: 'Chờ duyệt', PENDING_APPROVAL: 'Chờ duyệt', APPROVED: 'Đã duyệt', PREPARING: 'Đang chuẩn bị', READY: 'Đang chuẩn bị', IN_DELIVERY: 'Đang giao', DELIVERING: 'Đang giao', IN_TRANSIT: 'Đang giao', COMPLETED: 'Hoàn thành', DELIVERED: 'Hoàn thành', REJECTED: 'Từ chối', CANCELLED: 'Đã hủy', NEEDS_REVIEW: 'Cần xử lý' };
-  const status = raw.status || 'PENDING';
-  const itemCount = Array.isArray(raw.items) ? raw.items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0) : Number(raw.item_count || 0);
-  return { apiId: Number(raw.id), id: String(raw.order_number || raw.code || raw.id || '—'), customer: raw.customer_name || raw.customer?.full_name || raw.user?.full_name || 'Khách hàng', date: raw.created_at ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(raw.created_at)) : raw.date || 'Mới tạo', total: Number(raw.total_amount ?? raw.total ?? 0), status: states[String(status).toUpperCase()] || status, createdAt: raw.created_at, lines: normalizeOrderLines(raw.items), items: `${itemCount} sản phẩm`, delivery: raw.delivery_type === 'PICKUP' ? 'Điểm giao tập trung' : raw.delivery_type === 'DELIVERY' ? 'Giao riêng' : raw.delivery_method === 'group_point' ? 'Điểm giao tập trung' : raw.delivery_method === 'private' ? 'Giao riêng' : raw.delivery_method || 'Chưa chọn' };
-}
-function normalizeRequest(raw: any): ProductRequest {
-  const states: Record<string, string> = { OPEN: 'Mới', ACCEPTED: 'Đang xử lý', REJECTED: 'Từ chối', NEW: 'Mới', PENDING: 'Mới', PROCESSING: 'Đang xử lý', QUOTED: 'Đã báo giá', FULFILLED: 'Hoàn tất', CLOSED: 'Đã đóng' };
-  return { id: Number(raw.id), name: raw.product_name || raw.name || 'Mặt hàng', category: raw.category_name || raw.category || 'Khác', quantity: String(raw.quantity_requested ?? raw.quantity ?? 'Chưa xác định'), customer: raw.customer_name || raw.user?.full_name || 'Khách hàng', date: raw.created_at || raw.date || 'Mới tạo', status: states[String(raw.status || 'NEW').toUpperCase()] || raw.status || 'Mới' };
-}
-const toApiOrderStatus = (status: string) => ({ 'Đã duyệt': 'APPROVED', 'Đang chuẩn bị': 'PREPARING', 'Đang giao': 'DELIVERING', 'Hoàn thành': 'COMPLETED', 'Từ chối': 'REJECTED', 'Đã hủy': 'CANCELLED' } as Record<string, string>)[status] || status;
-const sections = [
-  { label: 'TỔNG QUAN', links: [{ name: 'Tổng quan', href: '/admin/dashboard', icon: faHouse }] },
-  { label: 'VẬN HÀNH', links: [{ name: 'Đơn hàng', href: '/admin/orders', icon: faClipboardList, count: '8' }, { name: 'Sản phẩm', href: '/admin/products', icon: faAppleWhole }, { name: 'Tồn kho', href: '/admin/inventory', icon: faBoxesStacked }, { name: 'Giao hàng', href: '/admin/deliveries', icon: faTruck }] },
-  { label: 'KHÁCH HÀNG', links: [{ name: 'Khách hàng', href: '/admin/customers', icon: faUsers }, { name: 'Yêu cầu mặt hàng', href: '/admin/requests', icon: faMessage, count: '3' },] },
-  { label: 'QUẢN TRỊ', links: [{ name: 'Giá & nhóm khách hàng', href: '/admin/pricing', icon: faCreditCard }, { name: 'Báo cáo', href: '/admin/reports', icon: faChartLine }, { name: 'Kiểm duyệt', href: '/admin/moderation', icon: faSliders }, { name: 'Thông báo', href: '/admin/notifications', icon: faBell }, { name: 'Nhật ký thao tác', href: '/admin/audit-logs', icon: faClipboardList }, { name: 'Cài đặt', href: '/admin/settings', icon: faGear }] },
-];
-const customerSections = [
-  { label: 'KHÔNG GIAN CỦA BẠN', links: [{ name: 'Cửa hàng', href: '/dashboard', icon: faHouse }, { name: 'Sản phẩm', href: '/products', icon: faAppleWhole }, { name: 'Đơn hàng của tôi', href: '/orders', icon: faClipboardList, count: '2' }, { name: 'Yêu cầu mặt hàng', href: '/requests', icon: faMessage }, { name: 'Thông báo', href: '/notifications', icon: faBell }] },
-  { label: 'TÀI KHOẢN', links: [{ name: 'Hồ sơ & địa chỉ', href: '/profile', icon: faUser }, { name: 'Trợ giúp', href: '/help', icon: faCircleQuestion }] },
-];
-const titleMap: Record<string, string> = { dashboard: 'Tổng quan', orders: 'Đơn hàng', products: 'Sản phẩm', inventory: 'Quản lý tồn kho', deliveries: 'Giao hàng', customers: 'Khách hàng', requests: 'Yêu cầu mặt hàng', reports: 'Báo cáo', moderation: 'Kiểm duyệt nội dung', pricing: 'Giá & nhóm khách hàng', 'audit-logs': 'Nhật ký thao tác', settings: 'Cài đặt hệ thống', notifications: 'Thông báo', profile: 'Hồ sơ & địa chỉ', help: 'Trung tâm trợ giúp', 'order-guide': 'Hướng dẫn đặt hàng', 'delivery-guide': 'Hướng dẫn giao hàng', cart: 'Giỏ hàng', checkout: 'Xác nhận đơn hàng', login: 'Chào mừng trở lại', register: 'Tạo tài khoản mới', verify: 'Xác minh số điện thoại', forgot: 'Khôi phục mật khẩu' };
-
-async function resolveCategory(name: string): Promise<number> {
-  const categories = await freshflow.categories<{ id: number; name: string; }>();
-  const existing = categories.find(item => item.name === name);
-  return existing?.id ?? (await freshflow.createCategory<{ id: number; }>(name)).id;
-}
+// Specialized module components
+import Newfeed from '@/components/newfeed';
+import AdminDashboardView from '@/components/admin-dashboard-view';
+import ShopPortalView from '@/components/shop-portal-view';
+import ShipperPortalView from '@/components/shipper-portal-view';
+import ChatModal from '@/components/chat-modal';
+import ReviewModal from '@/components/reviews-modal';
+import ProductEditorModal, { type ProductDraft } from '@/components/product-editor-modal';
 
 export default function FreshFlow() {
   const pathname = usePathname() || '/dashboard';
   const router = useRouter();
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/');
-  const page = isAdminRoute && pathname === '/admin' ? 'dashboard' : pathname.split('/').filter(Boolean).pop() || 'dashboard';
-  const [role, setRole] = usePersistentState<'admin' | 'customer'>('freshflow-role', 'customer');
-  const [products, setProducts] = useState<Product[]>(initialProducts);
-  const [orders, setOrders] = useState<Order[]>(initialOrders);
-  const [requests, setRequests] = useState<ProductRequest[]>(initialRequests);
+  const page =
+    isAdminRoute && pathname === '/admin'
+      ? 'dashboard'
+      : pathname.split('/').filter(Boolean).pop() || 'dashboard';
+
+  const [role, setRole] = usePersistentState<'admin' | 'shop' | 'customer' | 'shipper'>('freshflow-role', 'customer');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<{ id: number; name: string }[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [requests, setRequests] = useState<ProductRequest[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [vatConfigs, setVatConfigs] = useState<VatConfig[]>([]);
+  const [vatHistory, setVatHistory] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<ProductReview[]>([]);
+  const [shippers, setShippers] = useState<DomainUser[]>([]);
+  const [financialSummary, setFinancialSummary] = useState<FinancialSummary>(defaultFinancialSummary);
+
   const [cart, setCart] = usePersistentState<Record<number, number>>('freshflow-cart', {});
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('Tất cả');
   const [toast, setToast] = useState('');
-  const [modal, setModal] = useState('');
+  const [productEditorOpen, setProductEditorOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [, setModal] = useState('');
   const [activeTab, setActiveTab] = useState('Tất cả');
-  const [notifications, setNotifications] = useState<string[]>(['Đơn hàng FF-240918 đang chờ xác nhận', 'Rau cải kale sắp hết hàng', 'Có 3 yêu cầu mặt hàng mới']);
-  const [currentUser, setCurrentUser] = useState<{ full_name: string; customer_group: string; }>();
+  const [notifications, setNotifications] = useState<{ id: number; title: string; body: string; event_type: string; is_read: boolean; created_at?: string }[]>([]);
+  const [currentUser, setCurrentUser] = useState<DomainUser | undefined>();
   const [loadError, setLoadError] = useState('');
   const [reload, setReload] = useState(0);
-  const [apiState, setApiState] = useState<'checking' | 'live' | 'demo'>('checking');
+  const [apiState, setApiState] = useState<'checking' | 'live'>('checking');
   const [socketState, setSocketState] = useState<'connecting' | 'connected' | 'offline'>('offline');
+
+  // Realtime Chat state
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [activePeerId, setActivePeerId] = useState<number | undefined>();
+  const activePeerRef = useRef<number | undefined>(undefined);
+
+  // Review Modal state
+  const [reviewModalData, setReviewModalData] = useState<{
+    isOpen: boolean;
+    type: 'product' | 'shipper';
+    targetId: number;
+    title: string;
+  }>({ isOpen: false, type: 'product', targetId: 0, title: '' });
+
   const detailId = pathname.match(/^\/(?:admin\/)?products\/([^/]+)$/)?.[1];
   const detailProduct = products.find(product => String(product.id) === detailId);
   const orderDetailId = pathname.match(/^\/(?:admin\/)?orders\/([^/]+)$/)?.[1];
   const detailOrder = orders.find(order => order.id === decodeURIComponent(orderDetailId || ''));
+  const reviewableCompletedOrder = orders.find(order => ['Hoàn thành', 'COMPLETED'].includes(order.status) && order.lines?.some(line => line.productId));
+
   const admin = role === 'admin';
-  const title = detailProduct?.name || (detailOrder ? `Đơn ${detailOrder.id}` : undefined) || titleMap[page] || 'Tổng quan';
-  const links = admin ? sections : customerSections;
+  const shop = role === 'shop';
+  const shipper = role === 'shipper';
+
+  const title =
+    detailProduct?.name ||
+    (detailOrder ? `Đơn ${detailOrder.id}` : undefined) ||
+    titleMap[page] ||
+    'Tổng quan';
+
+  const links = admin ? adminSections : shop ? shopSections : shipper ? shipperSections : customerSections;
   const adminOnly = ['inventory', 'deliveries', 'customers', 'reports', 'moderation', 'pricing', 'audit-logs', 'settings'];
+
   useEffect(() => {
-    if (!authToken.get()) { setRole('customer'); setApiState('demo'); return; }
+    if (!authToken.get()) {
+      setRole('customer');
+      if (pathname !== '/') {
+        setApiState('checking');
+        router.replace('/login');
+        return;
+      }
+      let alive = true;
+      setApiState('checking');
+      setLoadError('');
+      Promise.all([freshflow.products<any>(), freshflow.categories<any>()])
+        .then(([productsResult, categoriesResult]) => {
+          if (!alive) return;
+          const categories = unwrapList<any>(categoriesResult);
+          setCategories(categories.map((category: any) => ({ id: Number(category.id), name: category.name })));
+          setProducts(unwrapList<any>(productsResult).map(product => normalizeProduct({
+            ...product,
+            category_name: categories.find(category => category.id === product.category_id)?.name,
+          })));
+          setPosts([]);
+          setApiState('live');
+        })
+        .catch(error => {
+          if (!alive) return;
+          setLoadError(error instanceof Error ? error.message : 'Không tải được sản phẩm.');
+          setApiState('live');
+        });
+      return () => { alive = false; };
+    }
+
     let alive = true;
     let realtime: RealtimeClient | undefined;
-    setApiState('checking'); setLoadError('');
-    setProducts([]); setOrders([]); setRequests([]); setNotifications([]);
-    const unauthorized = () => { if (alive) { realtime?.close(); setApiState('checking'); router.replace('/login'); } };
+    setApiState('checking');
+    setLoadError('');
+
+    const unauthorized = () => {
+      if (alive) {
+        realtime?.close();
+        setApiState('checking');
+        router.replace('/login');
+      }
+    };
     window.addEventListener('freshflow:unauthorized', unauthorized);
+
     async function start() {
       try {
         const user = await freshflow.me();
         if (!alive) return;
-        setCurrentUser(user); setRole(user.role === 'ADMIN' ? 'admin' : 'customer');
+        setCurrentUser(user as any);
+
+        const normalizedRole = user.role.toLowerCase() as 'admin' | 'shop' | 'customer' | 'shipper';
+        setRole(normalizedRole);
+
         const refreshSnapshot = async () => {
           const results = await Promise.allSettled([
-            user.role === 'ADMIN' ? freshflow.products<any>() : freshflow.catalog<any>(),
-            freshflow.orders<any>(), freshflow.productRequests<any>(), freshflow.notifications<any>(), freshflow.categories<any>(),
+            freshflow.products<any>(),
+            normalizedRole === 'shipper'
+              ? Promise.all([freshflow.shipperOrders<any>(undefined, false), freshflow.shipperOrders<any>(undefined, true)]).then(([assigned, available]) => [...assigned, ...available])
+              : freshflow.orders<any>(),
+            freshflow.productRequests<any>(),
+            freshflow.notifications<any>(),
+            freshflow.categories<any>(),
+            freshflow.posts<any>(),
+            freshflow.vatConfigs<any>(),
+            freshflow.vatHistory<any>(),
+            freshflow.dashboardFinancialSummary<any>(),
+            freshflow.shippers(),
+            normalizedRole === 'shop' ? freshflow.shopReviews<any>() : Promise.resolve([]),
           ]);
+
           if (!alive || !authToken.get()) return;
-          const failures: string[] = [];
-          const names = ['Sản phẩm', 'Đơn hàng', 'Yêu cầu mặt hàng', 'Thông báo', 'Danh mục'];
-          const lists = results.map((result, index) => {
-            try {
-              if (result.status === 'rejected') throw result.reason;
-              return unwrapList<any>(result.value);
-            } catch (error) { failures.push(`${names[index]}: ${error instanceof Error ? error.message : 'Phản hồi không hợp lệ'}`); return []; }
-          });
-          const [products, orders, requests, notices, categories] = lists;
-          setProducts(products.map(product => normalizeProduct({ ...product, category_name: product.category_name || categories.find(category => category.id === product.category_id)?.name })));
-          setOrders(orders.map(normalizeOrder)); setRequests(requests.map(normalizeRequest));
-          setNotifications(notices.filter(item => !item.is_read).map(item => item.title || item.body || 'Thông báo mới'));
-          setLoadError(failures.join(' · ')); setApiState('live');
+
+          const [
+            prodsRes,
+            ordersRes,
+            reqsRes,
+            noticesRes,
+            catsRes,
+            postsRes,
+            vatRes,
+            vatHistRes,
+            finRes,
+            shippersRes,
+            reviewsRes,
+          ] = results;
+
+          if (prodsRes.status === 'fulfilled') {
+            const categories = catsRes.status === 'fulfilled' ? unwrapList<any>(catsRes.value) : [];
+            setCategories(categories.map((category: any) => ({ id: Number(category.id), name: category.name })));
+            setProducts(
+              unwrapList<any>(prodsRes.value).map(p =>
+                normalizeProduct({
+                  ...p,
+                  category_name: categories.find(c => c.id === p.category_id)?.name,
+                })
+              )
+            );
+          }
+          if (ordersRes.status === 'fulfilled') {
+            setOrders(unwrapList<any>(ordersRes.value).map(normalizeOrder));
+          }
+          if (reqsRes.status === 'fulfilled') {
+            setRequests(unwrapList<any>(reqsRes.value).map(normalizeRequest));
+          }
+          if (noticesRes.status === 'fulfilled') {
+            const notices = unwrapList<any>(noticesRes.value);
+            setNotifications(notices);
+          }
+          if (postsRes.status === 'fulfilled') {
+            setPosts(unwrapList<any>(postsRes.value));
+          }
+          if (vatRes.status === 'fulfilled') {
+            setVatConfigs(unwrapList<any>(vatRes.value));
+          }
+          if (vatHistRes.status === 'fulfilled') {
+            setVatHistory(unwrapList<any>(vatHistRes.value));
+          }
+          if (finRes.status === 'fulfilled') {
+            setFinancialSummary(finRes.value);
+          }
+          if (shippersRes.status === 'fulfilled') {
+            setShippers(unwrapList<any>(shippersRes.value));
+          }
+          if (reviewsRes.status === 'fulfilled') {
+            setReviews(unwrapList<any>(reviewsRes.value));
+          }
+
+          setApiState('live');
         };
-        realtime = new RealtimeClient(event => {
-          if (['inventory.updated', 'order.status_changed', 'notification.created'].includes(event.type)) void refreshSnapshot();
-        }, state => { if (alive) { setSocketState(state); if (state === 'connected') void refreshSnapshot(); } });
+
+        realtime = new RealtimeClient(
+          event => {
+            if (
+              [
+                'inventory.updated',
+                'order.status_changed',
+                'notification.created',
+                'order.assigned',
+                'order.new',
+                'chat.message',
+              ].includes(event.type)
+            ) {
+              void refreshSnapshot();
+              const chatData = event.data as any;
+              if (event.type === 'chat.message' && chatData?.content) {
+                setToast(`Tin nhắn mới từ ${chatData.sender_name || 'Hệ thống'}: "${chatData.content}"`);
+                if (Number(chatData.sender_id) === activePeerRef.current) {
+                  setChatMessages(current => current.some(message => message.id === chatData.id) ? current : [...current, {
+                    id: Number(chatData.id), sender_id: Number(chatData.sender_id), sender_name: chatData.sender_name,
+                    content: chatData.content, receiver_id: user.id, is_read: false, created_at: chatData.created_at,
+                  }]);
+                }
+              }
+            }
+          },
+          state => {
+            if (alive) {
+              setSocketState(state);
+              if (state === 'connected') void refreshSnapshot();
+            }
+          }
+        );
+
         await refreshSnapshot();
         if (alive && authToken.get()) realtime.connect();
       } catch (error) {
-        if (alive && authToken.get()) { setLoadError(error instanceof Error ? error.message : 'Không tải được tài khoản.'); setApiState('live'); }
+        if (alive && authToken.get()) {
+          setLoadError(error instanceof Error ? error.message : 'Không tải được tài khoản.');
+          setApiState('live');
+        }
       }
     }
+
     void start();
-    return () => { alive = false; window.removeEventListener('freshflow:unauthorized', unauthorized); realtime?.close(); };
-  }, [reload]);
-  useEffect(() => { if (toast) { const timer = setTimeout(() => setToast(''), 2600); return () => clearTimeout(timer); } }, [toast]);
-  const filtered = useMemo(() => products.filter(p => (category === 'Tất cả' || p.category === category) && normalizeSearch(p.name).includes(normalizeSearch(query))), [products, category, query]);
+    return () => {
+      alive = false;
+      window.removeEventListener('freshflow:unauthorized', unauthorized);
+      realtime?.close();
+    };
+  }, [pathname, reload, router]);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const filtered = useMemo(
+    () =>
+      products.filter(
+        p => (category === 'Tất cả' || p.category === category) && normalizeSearch(p.name).includes(normalizeSearch(query))
+      ),
+    [products, category, query]
+  );
+
   const cartCount = Object.values(cart).reduce((a, b) => a + b, 0);
   const cartTotal = products.reduce((sum, p) => sum + (cart[p.id] || 0) * p.price, 0);
-  const addCart = (id: number) => setCart(v => ({ ...v, [id]: (v[id] || 0) + 1 }));
-  const changeOrderStatus = async (id: string, status: string) => { if (apiState === 'live') { try { if (!orders.find(order => order.id === id)?.apiId) throw new Error('Don hang chua co ID backend. Vui long tai lai danh sach.'); const response = await api.patch<any>(`/admin/orders/${orders.find(order => order.id === id)!.apiId}/status`, { status: toApiOrderStatus(status) }); setOrders(current => current.map(order => order.id === id ? normalizeOrder(response) : order)); setToast(`Đã cập nhật đơn ${id}`); return true; } catch (error) { setToast(error instanceof Error ? error.message : 'Không thể cập nhật đơn hàng'); return false; } } setOrders(v => v.map(o => o.id === id ? { ...o, status } : o)); setToast(`Bản demo: đã cập nhật đơn ${id} thành “${status}”`); };
-  const adjustInventory = async (id: number, delta: number) => { const product = products.find(item => item.id === id); if (!product || !Number.isFinite(delta) || delta === 0 || product.available + delta < 0) return false; if (apiState === 'live') { try { if (delta < 0) await freshflow.removeStock(id, -delta); else await freshflow.createBatch(id, { batch_date: new Date().toISOString(), initial_quantity: delta, is_open: true }); } catch (error) { notify(error instanceof Error ? error.message : 'Không thể điều chỉnh tồn kho'); return false; } } setProducts(current => current.map(product => product.id === id ? { ...product, available: Math.max(0, product.available + delta) } : product)); notify(apiState === 'live' ? 'Đã gửi điều chỉnh tồn kho.' : 'Bản demo: đã điều chỉnh số lượng tồn kho.'); };
-  const updateRequest = async (id: number, status: string) => { if (apiState === 'live') { try { await api.patch(`/admin/product-requests/${id}`, { status: status === 'Đã báo giá' ? 'QUOTED' : status }); } catch (error) { notify(error instanceof Error ? error.message : 'Không cập nhật được yêu cầu'); return; } } setRequests(current => current.map(request => request.id === id ? { ...request, status } : request)); notify(apiState === 'live' ? 'Đã cập nhật yêu cầu mặt hàng.' : 'Bản demo: đã cập nhật yêu cầu mặt hàng.'); };
-  const saveProduct = async (id: number, changes: Partial<Product>) => { if (apiState === 'live') { try { await api.patch(`/admin/products/${id}`, { name: changes.name, category_id: changes.category ? await resolveCategory(changes.category) : undefined, unit: changes.unit, base_price: changes.price }); } catch (error) { notify(error instanceof Error ? error.message : 'Không cập nhật được sản phẩm'); return false; } } setProducts(current => current.map(product => product.id === id ? { ...product, ...changes } : product)); notify(apiState === 'live' ? 'Đã cập nhật sản phẩm.' : 'Bản demo: sản phẩm đã được cập nhật.'); return true; };
-  const deleteProduct = async (id: number) => { if (apiState === 'live') { try { await api.delete(`/admin/products/${id}`); } catch (error) { notify(error instanceof Error ? error.message : 'Không xóa được sản phẩm'); return; } } setProducts(current => current.filter(product => product.id !== id)); notify(apiState === 'live' ? 'Đã xóa sản phẩm.' : 'Bản demo: sản phẩm đã được xóa.'); };
-  const clearNotifications = async () => { if (apiState === 'live') { try { const notices = await freshflow.notifications<{ id: number; is_read: boolean; }>(); await Promise.all(notices.filter(item => !item.is_read).map(item => freshflow.readNotification(item.id))); } catch (error) { notify(error instanceof Error ? error.message : 'Không thể cập nhật thông báo'); return; } } setNotifications([]); notify(apiState === 'live' ? 'Đã đánh dấu thông báo đã đọc.' : 'Đã đánh dấu thông báo demo là đã đọc.'); };
-  const publishNotification = async (title: string, body: string, audience: string) => { if (apiState === 'live') { try { throw new Error('API chua ho tro gui thong bao hang loat.'); } catch (error) { notify(error instanceof Error ? error.message : 'Không thể gửi thông báo'); return; } } setNotifications(current => [title, ...current]); notify('Bản demo: thông báo đã được thêm vào danh sách.'); };
-  const saveModal = async (values: Record<string, string>) => { const currentModal = modal; if (currentModal === 'product') { const price = Number(values['Giá bán (₫)']); const quantity = Number(values['Số lượng ban đầu']); const categoryName = values['Danh mục'] || 'Rau củ'; const payload = { name: values['Tên sản phẩm'] || 'Sản phẩm mới', category: categoryName, unit: values['Đơn vị tính'] || 'phần', price: Number.isFinite(price) ? price : 0, initial_quantity: Number.isFinite(quantity) ? quantity : 0, ...(values.image ? { image_url: values.image } : {}) }; let response: any; if (apiState === 'live') { try { if (values.image && (values.image.startsWith('data:') || values.image.length > 500)) throw new Error('Ảnh sản phẩm cần đường dẫn tối đa 500 ký tự. Hãy tải ảnh lên máy chủ lưu trữ và dán URL.'); response = await freshflow.createProduct<any>({ name: payload.name, category_id: await resolveCategory(categoryName), unit: payload.unit, base_price: payload.price, image_url: values.image || undefined }); if (quantity > 0) { try { await freshflow.createBatch(response.id, { batch_date: new Date().toISOString(), initial_quantity: quantity, is_open: true }); response.available_quantity = quantity; } catch (error) { notify('Da tao san pham, nhung chua them duoc lo ton kho. Vui long them lo o trang ton kho.'); setProducts(current => [normalizeProduct(response), ...current]); setModal(''); return; } } } catch (error) { notify(error instanceof Error ? error.message : 'Không thể tạo sản phẩm'); return; } } const created = normalizeProduct({ ...payload, ...response, id: response?.id || Math.max(0, ...products.map(product => product.id)) + 1, available: response?.available ?? payload.initial_quantity, ordered: 0, approved: 0, color: '#e7eed6' }); setProducts(current => [created, ...current]); notify(apiState === 'live' ? 'Đã tạo sản phẩm.' : 'Bản demo: đã thêm sản phẩm vào danh mục.'); } else { const payload = { product_name: values['Tên mặt hàng'] || 'Mặt hàng mới', category: values['Danh mục mong muốn'] || 'Khác', quantity: values['Số lượng cần'] || 'Chưa xác định', note: values['Ghi chú'] || '' }; let response: any; if (apiState === 'live') { try { response = await freshflow.createRequest(payload.product_name, `Danh muc: ${payload.category}; So luong: ${payload.quantity}; ${payload.note}`); } catch (error) { notify(error instanceof Error ? error.message : 'Không thể gửi yêu cầu mặt hàng'); return; } } setRequests(current => [{ id: Number(response?.id) || Math.max(0, ...current.map(request => request.id)) + 1, name: payload.product_name, category: payload.category, quantity: payload.quantity, customer: 'Bạn', date: 'Vừa xong', status: 'Mới' }, ...current]); notify(apiState === 'live' ? 'Yêu cầu mặt hàng đã được gửi.' : 'Bản demo: yêu cầu mặt hàng đã được lưu.'); } setModal(''); };
+  const addCart = (id: number) => {
+    setCart(v => ({ ...v, [id]: (v[id] || 0) + 1 }));
+    setToast('Đã thêm sản phẩm vào giỏ hàng');
+  };
+
+  const changeOrderStatus = async (id: string, status: string, note?: string) => {
+    if (apiState === 'live') {
+      try {
+        const target = orders.find(order => order.id === id);
+        if (!target?.apiId) throw new Error('Đơn hàng chưa có ID backend.');
+        const response = await api.patch<any>(`/orders/${target.apiId}/status`, {
+          status: toApiOrderStatus(status),
+          note,
+        });
+        setOrders(current => current.map(order => (order.id === id ? normalizeOrder(response) : order)));
+        setToast(`Đã cập nhật đơn ${id} thành "${status}"`);
+        return true;
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : 'Không thể cập nhật đơn hàng');
+        return false;
+      }
+    }
+    setOrders(v => v.map(o => (o.id === id ? { ...o, status } : o)));
+    setToast(`Đã cập nhật đơn ${id} thành "${status}"`);
+    return true;
+  };
+
+  const adjustInventory = async (id: number, delta: number) => {
+    const product = products.find(item => item.id === id);
+    if (!product || !Number.isFinite(delta) || delta === 0 || product.available + delta < 0) return false;
+    if (apiState === 'live') {
+      try {
+        if (delta < 0) await freshflow.removeStock(id, -delta);
+        else
+          await freshflow.createBatch(id, {
+            batch_date: new Date().toISOString(),
+            initial_quantity: delta,
+            is_open: true,
+          });
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Không thể điều chỉnh tồn kho');
+        return false;
+      }
+    }
+    setProducts(current =>
+      current.map(p => (p.id === id ? { ...p, available: Math.max(0, p.available + delta) } : p))
+    );
+    notify('Đã cập nhật số lượng tồn kho.');
+    return true;
+  };
+
+  const updateRequest = async (id: number, status: string) => {
+    if (apiState === 'live') {
+      try {
+        await api.patch(`/admin/product-requests/${id}`, {
+          status: status === 'Đã báo giá' ? 'QUOTED' : status,
+        });
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Không cập nhật được yêu cầu');
+        return;
+      }
+    }
+    setRequests(current => current.map(r => (r.id === id ? { ...r, status } : r)));
+    notify('Đã cập nhật yêu cầu mặt hàng.');
+  };
+
+  const saveProduct = async (draft: ProductDraft, existing?: Product) => {
+    if (apiState !== 'live') {
+      notify('Mất kết nối máy chủ. Sản phẩm chưa được lưu.');
+      return false;
+    }
+    const categoryId = categories.find(category => category.name === draft.category)?.id;
+    if (!categoryId) {
+      notify('Danh mục này chưa tồn tại. Hãy chọn một danh mục có sẵn.');
+      return false;
+    }
+    try {
+      const payload = { name: draft.name.trim(), description: draft.description.trim(), category_id: categoryId, unit: draft.unit.trim(), base_price: draft.price, image_url: draft.image_url || null };
+      if (existing) {
+        const updated = await freshflow.updateProduct<any>(existing.id, payload);
+        setProducts(current => current.map(item => item.id === existing.id ? normalizeProduct({ ...updated, category_name: draft.category }) : item));
+        notify('Đã cập nhật mặt hàng.');
+      } else {
+        const created = await freshflow.createProduct<any>({ ...payload, shop_id: shop ? currentUser?.id : undefined });
+        if (draft.stock > 0) await freshflow.createBatch(created.id, { batch_date: new Date().toISOString(), initial_quantity: draft.stock, is_open: true });
+        setProducts(current => [normalizeProduct({ ...created, category_name: draft.category, available_quantity: draft.stock }), ...current]);
+        notify('Đã thêm mặt hàng vào cửa hàng.');
+      }
+      return true;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Không lưu được mặt hàng.');
+      return false;
+    }
+  };
+
+  const saveProductInline = async (id: number, changes: Partial<Product>) => {
+    const existing = products.find(product => product.id === id);
+    if (!existing) return false;
+    return saveProduct({
+      name: changes.name ?? existing.name,
+      description: existing.description || '',
+      category: changes.category ?? existing.category,
+      unit: changes.unit ?? existing.unit,
+      price: changes.price ?? existing.price,
+      stock: existing.available,
+      image_url: existing.image || '',
+    }, existing);
+  };
+
+  const deleteProduct = async (id: number) => {
+    if (apiState === 'live') {
+      try {
+        await api.delete(`/admin/products/${id}`);
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Không xóa được sản phẩm');
+        return;
+      }
+    }
+    setProducts(current => current.filter(p => p.id !== id));
+    notify('Đã xóa sản phẩm.');
+  };
+
+  const markNotificationRead = async (id: number) => {
+    try {
+      await freshflow.readNotification(id);
+      setNotifications(current => current.map(item => item.id === id ? { ...item, is_read: true } : item));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Kh?ng c?p nh?t ???c th?ng b?o.');
+    }
+  };
+
+  const clearNotifications = async () => {
+    if (apiState === 'live') {
+      try {
+        const notices = await freshflow.notifications<{ id: number; is_read: boolean }>();
+        await Promise.all(notices.filter(item => !item.is_read).map(item => freshflow.readNotification(item.id)));
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Không thể cập nhật thông báo');
+        return;
+      }
+    }
+    setNotifications(current => current.map(item => ({ ...item, is_read: true })));
+    notify('Đã đánh dấu tất cả thông báo là đã đọc.');
+  };
+
   const placeOrder = async (details: CheckoutDetails): Promise<boolean> => {
-    if (!cartCount) { notify('Giỏ hàng đang trống'); return false; }
-    if (apiState === 'demo') {
+    if (!cartCount) {
+      notify('Giỏ hàng đang trống');
+      return false;
+    }
+    if (apiState !== 'live' || !authToken.get()) {
       sessionStorage.setItem('freshflow-after-login', '/checkout');
       notify('Đăng nhập để tiếp tục tạo đơn hàng.');
       router.push('/login');
       return false;
     }
-    const lines: OrderLine[] = products.filter(p => cart[p.id]).map(p => ({ productId: p.id, name: p.name, image: p.image, unit: p.unit, quantity: cart[p.id], price: p.price }));
-    const fee = details.delivery === 'Điểm giao tập trung' ? 0 : 20000;
+
     if (apiState === 'live') {
       try {
         const catalog = await freshflow.catalog<any>();
@@ -191,242 +494,619 @@ export default function FreshFlow() {
         const pickup = details.delivery === 'Điểm giao tập trung';
         const addresses = pickup ? [] : await freshflow.addresses<any>();
         const address = addresses.find(item => Number(item.id) === details.addressId);
-        if (!pickup && !address) throw new Error('Địa chỉ giao hàng không còn tồn tại. Vui lòng chọn lại.');
-        const created = await freshflow.createOrder<any>({ items, delivery_type: pickup ? 'PICKUP' : 'HOME', delivery_address: address ? [address.line1, address.ward, address.district, address.city].filter(Boolean).join(', ') : '', delivery_slot_id: details.deliverySlotId ?? null, note: details.note });
+        if (!pickup && !address) throw new Error('Vui lòng chọn địa chỉ giao hàng hợp lệ.');
+
+        const created = await freshflow.createOrder<any>({
+          items,
+          delivery_type: pickup ? 'PICKUP' : 'HOME',
+          delivery_address: address
+            ? [address.line1, address.ward, address.district, address.city].filter(Boolean).join(', ')
+            : '',
+          recipient_name: address?.recipient || currentUser?.full_name || '',
+          recipient_phone: address?.phone || currentUser?.phone || '',
+          delivery_slot_id: details.deliverySlotId ?? null,
+          payment_method: details.paymentMethod || 'COD',
+          note: details.note,
+        });
+
         setOrders(current => [normalizeOrder(created), ...current]);
-      } catch (error) { notify(error instanceof Error ? error.message : 'Không thể gửi đơn hàng'); return false; }
-    } else { const demoOrder: Order = { createdAt: new Date().toISOString(), id: `FF-${Date.now().toString().slice(-6)}`, customer: initialOrders[0].customer, date: 'Vừa xong', total: cartTotal + fee, status: 'Chờ duyệt', lines, items: `${cartCount} sản phẩm`, delivery: details.delivery }; setOrders(current => [demoOrder, ...current]); } setCart({}); router.push('/orders'); setToast(apiState === 'live' ? 'Đã gửi đơn hàng đến cửa hàng.' : 'Bản demo: đơn hàng đã được tạo và đang chờ duyệt.'); return true;
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Không thể gửi đơn hàng');
+        return false;
+      }
+    }
+
+    setCart({});
+    router.push('/orders');
+    setToast('Đã gửi đơn hàng thành công! Đang chờ xác nhận.');
+    return true;
   };
-  const notify = (text: string) => { setToast(text); };
-  const logout = async () => { authToken.clear(); sessionStorage.removeItem('freshflow-demo-session'); setCart({}); setProducts(initialProducts); setOrders(initialOrders); setRequests(initialRequests); setNotifications([]); setCurrentUser(undefined); setRole('customer'); router.push('/login'); };
-  const link = (href: string, name: string, icon: any, count?: string) => { if (apiState === 'demo') count = undefined; else if (apiState === 'live') count = href.endsWith('/orders') ? String(orders.filter(order => order.status === 'Chờ duyệt').length) : href.endsWith('/requests') ? String(requests.filter(request => request.status === 'Mới').length) : undefined; return <Link key={name} href={href} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] transition ${page === href.split('/').pop() ? 'nav-active' : 'text-[#64736b] hover:bg-white hover:text-[#233b30]'}`}><FontAwesomeIcon icon={icon} className="w-4 text-[14px]" /><span className="flex-1">{name}</span>{count && <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-bold text-[#66736c]">{count}</span>}</Link>; };
-  const statusTone = (status: string) => status === 'Hoàn thành' ? 'green' : status === 'Đang giao' ? 'blue' : status === 'Từ chối' ? 'red' : status === 'Chờ duyệt' ? 'orange' : 'gray';
 
-  if (apiState === 'checking') return <div className="p-8" role="status">Đang kiểm tra kết nối và tài khoản…</div>;
-  if (loadError && apiState === 'live') return <div className="panel m-8 space-y-4 p-6"><h1 className="font-bold">Chưa tải được dữ liệu hệ thống</h1><p role="alert" className="text-sm text-rose-700">{loadError}</p><Button onClick={() => setReload(value => value + 1)}>Thử lại</Button><Button kind="secondary" onClick={logout}>Đăng nhập lại</Button></div>;
-  if (pathname === '/') return <HomePage products={products} addCart={addCart} money={money} cartCount={cartCount} />;
-  if (isAdminRoute && apiState === 'demo') return <div className="flex min-h-screen items-center justify-center p-6"><div className="panel max-w-md p-8 text-center"><h1 className="text-xl font-bold">Admin portal</h1><p className="mt-2 text-sm text-slate-500">Please sign in with an administrator account.</p><Button className="mt-5" onClick={() => router.push('/login')}>Sign in</Button></div></div>;
-  if (isAdminRoute && apiState === 'live' && !admin) return <div className="flex min-h-screen items-center justify-center p-6"><div className="panel max-w-md p-8 text-center"><h1 className="text-xl font-bold">Admin access required</h1><p className="mt-2 text-sm text-slate-500">This account cannot access the admin portal.</p><Button className="mt-5" onClick={() => router.push('/dashboard')}>Back to store</Button></div></div>;
-  if ((apiState === 'demo' || !admin) && adminOnly.includes(page)) return <div className="flex min-h-screen items-center justify-center p-6"><div className="panel max-w-md p-8 text-center"><h1 className="mt-4 text-xl font-extrabold">{apiState === 'demo' ? 'Khu vực quản trị không có trong chế độ xem trước' : 'Trang dành cho quản trị viên'}</h1><p className="mt-2 text-sm text-slate-500">{apiState === 'demo' ? 'Đăng nhập bằng tài khoản quản trị viên để truy cập khu vực này.' : 'Tài khoản hiện tại không có quyền mở khu vực này.'}</p><Button className="mt-5" onClick={() => router.push(apiState === 'demo' ? '/login' : '/dashboard')}>{apiState === 'demo' ? 'Đăng nhập' : 'Quay lại cửa hàng'}</Button></div></div>;
+  const handleCreatePost = async (postData: any) => {
+    try {
+      const created = await freshflow.createPost<Post>(postData);
+      setPosts(current => [created, ...current]);
+      notify('Đã đăng bài quảng bá lên Newfeed thành công!');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Không thể đăng bài');
+    }
+  };
 
-  return <div className="min-h-screen bg-white">
-    <aside className="desktop-sidebar fixed inset-y-0 left-0 z-20 flex w-[248px] flex-col border-r border-[#e9ede8] bg-white px-5 py-6">
-      <Link href={admin && isAdminRoute ? '/admin/dashboard' : '/dashboard'} className="mb-8 flex items-center gap-3 px-2"><div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#176b52] text-white"><FontAwesomeIcon icon={faSeedling} /></div><div><div className="text-[18px] font-extrabold tracking-tight">freshflow<span className="text-[#73a37e]">.</span></div><div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#97a29b]">Fresh, every day</div></div></Link>
-      <div className="mb-5 rounded-2xl bg-white p-3"><div className="mb-2 text-[10px] font-bold uppercase tracking-[.13em] text-[#91a096]">{apiState === 'live' ? 'TÀI KHOẢN' : 'CHẾ ĐỘ XEM TRƯỚC'}</div><div className="flex w-full items-center gap-2.5 rounded-xl bg-white p-2.5 text-left shadow-sm"><div className={`flex h-8 w-8 items-center justify-center rounded-lg ${admin ? 'bg-white text-[#176b52]' : 'bg-white text-[#bb7920]'}`}><FontAwesomeIcon icon={admin ? faUserGroup : faUser} /></div><div className="flex-1"><div className="text-xs font-bold">{admin ? 'Quản trị viên' : 'Khách hàng'}</div><div className="text-[10px] text-[#89958e]">{admin ? 'Quản lý FreshFlow' : apiState === 'demo' ? 'Dữ liệu mẫu · không đăng nhập' : 'Nhóm sinh viên'}</div></div></div></div>
-      <nav className="scrollbar-hide flex-1 space-y-5 overflow-y-auto">{links.map(section => <div key={section.label}><div className="mb-2 px-3 text-[9px] font-extrabold tracking-[.16em] text-[#a2aca5]">{section.label}</div><div className="space-y-1">{section.links.map((item: any) => link(item.href, item.name, item.icon, item.count))}</div></div>)}</nav>
-      <div className="mt-5 rounded-2xl bg-white p-4"><div className="mb-2 flex items-center gap-2 text-xs font-bold text-[#285a42]"><FontAwesomeIcon icon={faCircleQuestion} /> Cần hỗ trợ?</div><p className="mb-3 text-[11px] leading-relaxed text-[#72867a]">Đội ngũ FreshFlow luôn sẵn sàng giúp bạn.</p><Link href={admin && isAdminRoute ? '/admin/help' : '/help'} className="text-[11px] font-bold text-[#176b52]">Trung tâm trợ giúp <FontAwesomeIcon icon={faArrowRight} className="ml-1" /></Link></div>
-      <button onClick={logout} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2 text-xs font-semibold text-[#7e8a82] hover:bg-white"><FontAwesomeIcon icon={faRightFromBracket} /> {apiState === 'demo' ? 'Thoát xem trước' : 'Đăng xuất'}</button>
-    </aside>
-    <main className="main-content min-h-screen pb-12 pl-[248px]">
-      <header className="sticky top-0 z-10 flex h-[76px] items-center justify-between border-b border-[#e9ede8] bg-white px-9 backdrop-blur"><div><div className="text-[11px] font-medium text-[#98a39c]">FreshFlow <span className="mx-1">/</span> <span className="text-[#53625a]">{title}</span></div></div><div className="flex items-center gap-3"><GlobalSearch key={`${admin}-${apiState}`} admin={admin} apiState={apiState} products={products} orders={orders} requests={requests} /><Link href={admin && isAdminRoute ? '/admin/notifications' : '/notifications'} className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#607168]"><FontAwesomeIcon icon={faBell} className="text-sm" />{notifications.length > 0 && <i className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#e97856] ring-2 ring-white" />}</Link>{!admin && <Link href="/cart" className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#607168]"><FontAwesomeIcon icon={faShoppingCart} />{cartCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#176b52] text-[9px] text-white">{cartCount}</span>}</Link>}<button onClick={() => router.push(apiState === 'demo' ? '/login' : admin && isAdminRoute ? '/admin/settings' : '/profile')} className="flex items-center gap-2.5 border-l border-[#e4e9e4] pl-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-bold text-[#37684b]">{apiState === 'demo' ? 'KH' : admin ? 'MA' : 'NA'}</div><div className="hidden text-left sm:block"><div className="text-xs font-bold">{apiState === 'demo' ? 'Khách xem trước' : currentUser?.full_name || (admin ? 'Minh Anh' : 'Ngọc Anh')}</div><div className="text-[10px] text-[#8c9890]">{apiState === 'demo' ? 'Sinh viên · chưa đăng nhập' : admin ? 'Quản trị viên' : currentUser?.customer_group === 'WORKING' ? 'Người đi làm' : 'Sinh viên'}</div></div><FontAwesomeIcon icon={faChevronDown} className="hidden text-[9px] text-slate-400 sm:block" /></button></div></header>
-      <div className="mx-auto max-w-[1440px] px-9 py-8">
-        <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><div className="mb-1 text-[11px] font-semibold text-[#83a18c]">{new Intl.DateTimeFormat('vi-VN', { dateStyle: 'full', timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())}</div><h1 className="text-[26px] font-extrabold tracking-tight text-[#202d26]">{page === 'dashboard' ? (admin ? `Xin chào, ${currentUser?.full_name || 'bạn'} ` : 'Rau quả tươi đang chờ bạn ') : title}</h1><p className="mt-1 text-[13px] text-[#849088]">{page === 'dashboard' ? (admin ? 'Đây là những gì đang diễn ra với cửa hàng của bạn hôm nay.' : 'Chọn những sản phẩm tươi ngon cho ngày hôm nay.') : subtitle(page, admin)}</p></div><div className="flex gap-2">{page === 'dashboard' && !admin && <Link href="/requests"><Button kind="secondary"><FontAwesomeIcon icon={faPlus} /> Yêu cầu mặt hàng</Button></Link>}{page === 'products' && admin && <Button onClick={() => setModal('product')}><FontAwesomeIcon icon={faPlus} /> Thêm sản phẩm</Button>}{page === 'orders' && <Button kind="secondary" onClick={() => apiState === 'live' ? setReload(value => value + 1) : setToast('Đã tải danh sách mới nhất')}><FontAwesomeIcon icon={faFilter} /> Lọc đơn hàng</Button>}{page === 'dashboard' && admin && <Button kind="secondary" onClick={() => router.push(isAdminRoute ? '/admin/reports' : '/reports')}><FontAwesomeIcon icon={faChartLine} /> Xuất báo cáo</Button>}</div></div>
-        {page === 'dashboard' && (apiState === 'live' ? <ApiDashboard admin={admin} products={products} orders={orders} requestCount={requests.length} money={money} basePath={isAdminRoute ? '/admin' : ''} /> : <Dashboard admin={admin} preview={apiState === 'demo'} products={products} orders={orders} cart={cart} addCart={addCart} go={(path: string) => router.push(admin && isAdminRoute ? `/admin${path}` : path)} money={money} statusTone={statusTone} />)}
-        {page === 'products' && <ProductsPanel query={query} setQuery={setQuery} admin={admin} products={filtered} category={category} setCategory={setCategory} addCart={addCart} money={money} create={() => setModal('product')} go={(path: string) => router.push(admin && isAdminRoute ? `/admin${path}` : path)} save={saveProduct} remove={deleteProduct} />}
-        {page === 'inventory' && <InventoryView products={products} money={money} adjust={adjustInventory} />}
-        {page === 'orders' && <OrdersView admin={admin} orders={apiState === 'demo' ? [] : admin || apiState === 'live' ? orders : orders.filter(order => order.customer === 'Nguyễn Ngọc Anh')} updateStatus={changeOrderStatus} statusTone={statusTone} money={money} tab={activeTab} setTab={setActiveTab} />}
-        {page === 'deliveries' && <Deliveries orders={orders} money={money} change={changeOrderStatus} statusTone={statusTone} />}
-        {page === 'customers' && <CustomersView notify={notify} apiState={apiState} />}
-        {page === 'requests' && <RequestsView admin={admin} requests={admin ? requests : apiState === 'live' ? requests.map(request => ({ ...request, customer: 'Bạn' })) : requests} notify={notify} open={() => setModal('request')} update={updateRequest} />}
-        {page === 'reports' && <ReportsPanel money={money} apiState={apiState} orders={orders} />}
-        {page === 'pricing' && <Pricing notify={notify} apiState={apiState} products={products} />}
-        {page === 'audit-logs' && <AuditLogPanel apiState={apiState} />}
-        {page === 'moderation' && <ModerationView notify={notify} apiState={apiState} />}
-        {page === 'settings' && <SettingsView notify={notify} apiState={apiState} basePath={isAdminRoute ? '/admin' : ''} />}
-        {page === 'notifications' && <NotificationsPanel admin={admin} items={notifications} clear={clearNotifications} publish={publishNotification} />}
-        {page === 'profile' && (apiState === 'live' ? <ApiProfile /> : <ProfileConnected notify={notify} apiState={apiState} />)}
-        {page === 'help' && <Help />}
-        {page === 'order-guide' && <GuidePage type="orders" />}
-        {page === 'delivery-guide' && <GuidePage type="delivery" />}
-        {page === 'cart' && <Cart products={products} cart={cart} setCart={setCart} money={money} go={(path: string) => router.push(admin && isAdminRoute ? `/admin${path}` : path)} />}
-        {page === 'checkout' && (apiState === 'live' ? <ApiCheckout money={money} total={cartTotal} cart={cart} done={placeOrder} /> : <CheckoutPanel money={money} total={cartTotal} notify={notify} apiState={apiState} done={placeOrder} />)}
-        {detailId && detailProduct && <ProductDetail product={detailProduct} addCart={addCart} money={money} go={(path: string) => router.push(admin && isAdminRoute ? `/admin${path}` : path)} />}
-        {detailId && !detailProduct && <div className="panel p-12 text-center"><h2 className="font-bold">Không tìm thấy sản phẩm</h2><Link className="mt-3 inline-block text-sm font-bold text-[#176b52]" href="/products">Quay lại cửa hàng</Link></div>}
-        {orderDetailId && detailOrder && <OrderDetailView order={detailOrder} statusTone={statusTone} money={money} admin={admin && isAdminRoute} updateStatus={changeOrderStatus} go={(path: string) => router.push(admin && isAdminRoute ? `/admin${path}` : path)} />}
-        {orderDetailId && !detailOrder && <div className="panel p-12 text-center"><h2 className="font-bold">Không tìm thấy đơn hàng</h2><Link className="mt-3 inline-block text-sm font-bold text-[#176b52]" href="/orders">Quay lại danh sách đơn</Link></div>}
-        {!titleMap[page] && !detailId && !orderDetailId && <Dashboard admin={admin} products={products} orders={orders} cart={cart} addCart={addCart} go={(path: string) => router.push(admin && isAdminRoute ? `/admin${path}` : path)} money={money} statusTone={statusTone} />}
+  const handleUpdateVat = async (id: number, rate: number, note: string) => {
+    try {
+      const updated = await freshflow.updateVatConfig<VatConfig>(id, {
+        tax_name: 'VAT',
+        rate,
+        note,
+      });
+      setVatConfigs(current => current.map(v => (v.id === id ? updated : v)));
+      const history = await freshflow.vatHistory<any>();
+      setVatHistory(unwrapList<any>(history));
+      notify(`Đã cập nhật thuế suất VAT thành ${rate * 100}%`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi cập nhật VAT');
+    }
+  };
+
+  const handleAssignShipper = async (orderApiId: number, shipperId: number) => {
+    try {
+      const updated = await freshflow.assignShipper<any>(orderApiId, shipperId);
+      setOrders(current => current.map(o => (o.apiId === orderApiId ? normalizeOrder(updated) : o)));
+      notify('Đã phân công Shipper giao đơn hàng.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi phân công');
+    }
+  };
+
+  const handleReplyReview = async (reviewId: number, reply: string) => {
+    try {
+      const updated = await freshflow.replyReview<ProductReview>(reviewId, reply);
+      setReviews(current => current.map(r => (r.id === reviewId ? updated : r)));
+      notify('Đã gửi phản hồi đánh giá.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi phản hồi');
+    }
+  };
+
+  // Shipper actions
+  const handleShipperClaim = async (orderId: number) => {
+    try {
+      const updated = await freshflow.claimShipperOrder<any>(orderId);
+      setOrders(current => current.map(o => (o.apiId === orderId ? normalizeOrder(updated) : o)));
+      notify('Đã nhận giao đơn hàng!');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi nhận đơn');
+    }
+  };
+
+  const handleShipperPickup = async (orderId: number) => {
+    try {
+      const updated = await freshflow.shipperPickup<any>(orderId);
+      setOrders(current => current.map(o => (o.apiId === orderId ? normalizeOrder(updated) : o)));
+      notify('Đã xác nhận lấy hàng từ Shop.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi cập nhật');
+    }
+  };
+
+  const handleShipperDelivering = async (orderId: number) => {
+    try {
+      const updated = await freshflow.shipperDelivering<any>(orderId);
+      setOrders(current => current.map(o => (o.apiId === orderId ? normalizeOrder(updated) : o)));
+      notify('Bắt đầu giao đơn hàng.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi cập nhật');
+    }
+  };
+
+  const handleShipperComplete = async (orderId: number, paidAmount: number) => {
+    try {
+      const updated = await freshflow.shipperComplete<any>(orderId, paidAmount);
+      setOrders(current => current.map(o => (o.apiId === orderId ? normalizeOrder(updated) : o)));
+      notify(`Giao thành công! Đã thu COD: ${money(paidAmount)}`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi hoàn tất');
+    }
+  };
+
+  // Chat actions
+  const openChatWith = async (peerId?: number) => {
+    setIsChatOpen(true);
+    if (peerId) {
+      setActivePeerId(peerId);
+      activePeerRef.current = peerId;
+    }
+    try {
+      const convs = await freshflow.chatConversations<Conversation>();
+      const conversationList = unwrapList<Conversation>(convs);
+      setConversations(conversationList);
+      const targetPeerId = peerId || activePeerRef.current || conversationList[0]?.peer_id;
+      if (targetPeerId) {
+        setActivePeerId(targetPeerId);
+        activePeerRef.current = targetPeerId;
+      }
+      const msgs = await freshflow.chatMessages<ChatMessage>(targetPeerId);
+      setChatMessages(unwrapList<ChatMessage>(msgs));
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (page === 'chat') void openChatWith();
+  }, [page]);
+
+  const handleSendChatMessage = async (content: string, peerId?: number, orderId?: number) => {
+    try {
+      const sent = await freshflow.sendChatMessage<ChatMessage>({
+        receiver_id: peerId,
+        order_id: orderId,
+        content,
+      });
+      setChatMessages(prev => [...prev, sent]);
+    } catch (e) {
+      notify('Không gửi được tin nhắn.');
+    }
+  };
+
+  // Review submission
+  const handleOpenReview = (targetId: number, title: string, type: 'product' | 'shipper') => {
+    setReviewModalData({ isOpen: true, type, targetId, title });
+  };
+
+  const handleSubmitReview = async (data: any) => {
+    try {
+      if (reviewModalData.type === 'product') {
+        await freshflow.createProductReview(data.product_id, data);
+        notify('Cảm ơn bạn đã đánh giá sản phẩm!');
+      } else {
+        await freshflow.reviewShipper(data.order_id, data);
+        notify('Cảm ơn bạn đã đánh giá tài xế giao hàng!');
+      }
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Không gửi được đánh giá');
+    }
+  };
+
+  const notify = (text: string) => setToast(text);
+
+  const logout = async () => {
+    authToken.clear();
+    setCart({});
+    setProducts([]);
+    setOrders([]);
+    setRequests([]);
+    setNotifications([]);
+    setCurrentUser(undefined);
+    setRole('customer');
+    router.push('/login');
+  };
+
+
+  const link = (href: string, name: string, icon: any, count?: string) => {
+    const isCurrent = page === href.split('/').pop();
+    return (
+      <Link
+        key={name}
+        href={href}
+        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] transition ${isCurrent ? 'nav-active font-bold text-[#176b52] bg-[#f0f7f3]' : 'text-[#64736b] hover:bg-slate-50 hover:text-[#233b30]'
+          }`}
+      >
+        <FontAwesomeIcon icon={icon} className="w-4 text-[14px]" />
+        <span className="flex-1">{name}</span>
+        {count && <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-bold text-[#66736c] shadow-sm">{count}</span>}
+      </Link>
+    );
+  };
+
+  const statusTone = (status: string) =>
+    status === 'Hoàn thành'
+      ? 'green'
+      : status === 'Đang giao'
+        ? 'blue'
+        : status === 'Từ chối' || status === 'Đã hủy'
+          ? 'red'
+          : status === 'Chờ xác nhận' || status === 'Chờ duyệt'
+            ? 'orange'
+            : 'gray';
+
+  if (apiState === 'checking') return <div className="p-8 text-xs font-semibold text-slate-500">Đang khởi tạo kết nối hệ thống FreshFlow…</div>;
+  if (loadError && apiState === 'live') {
+    return (
+      <div className="panel m-8 space-y-4 p-6">
+        <h1 className="font-bold">Chưa tải được dữ liệu hệ thống</h1>
+        <p role="alert" className="text-sm text-rose-700">{loadError}</p>
+        <Button onClick={() => setReload(v => v + 1)}>Thử lại</Button>
+        <Button kind="secondary" onClick={logout}>Đăng nhập lại</Button>
       </div>
-    </main>
-    <nav className="mobile-bottom fixed bottom-0 left-0 right-0 z-30 hidden justify-around border-t bg-white px-2 py-2">{(admin ? sections[0].links.concat(sections[1].links.slice(0, 2)) : customerSections[0].links.slice(0, 4)).map((item: any) => <Link href={item.href} key={item.name} className={`flex flex-col items-center gap-1 px-2 py-1 text-[9px] ${page === item.href.split('/').pop() ? 'text-[#176b52]' : 'text-slate-400'}`}><FontAwesomeIcon icon={item.icon} className="text-base" />{item.name}</Link>)}</nav>
-    {toast && <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl bg-[#203a2e] px-4 py-3 text-sm font-medium text-white shadow-xl"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/15"><FontAwesomeIcon icon={faCheck} className="text-xs" /></span>{toast}</div>}
-    {modal && <Modal type={modal} close={() => setModal('')} submit={saveModal} />}
-  </div>;
-}
+    );
+  }
 
-function subtitle(page: string, admin: boolean) {
-  const map: Record<string, string> = { orders: admin ? 'Theo dõi và xử lý tất cả đơn đặt hàng.' : 'Theo dõi trạng thái các đơn hàng của bạn.', products: admin ? 'Danh mục sản phẩm đang kinh doanh.' : 'Khám phá nông sản tươi ngon mỗi ngày.', inventory: 'Số lượng khả dụng, đã duyệt và đang chờ duyệt theo từng mặt hàng.', deliveries: 'Lên lịch giao và cập nhật tiến độ giao hàng.', customers: 'Thông tin khách hàng, nhóm áp dụng và trạng thái tài khoản.', requests: 'Theo dõi các mặt hàng khách hàng đang cần.', reports: 'Tổng hợp doanh thu và hiệu quả vận hành.', moderation: 'Xử lý nội dung được hệ thống gắn cờ.', settings: 'Cấu hình các tham số vận hành của cửa hàng.', notifications: 'Cập nhật mới nhất về đơn hàng và cửa hàng.', profile: 'Quản lý thông tin cá nhân và địa chỉ giao hàng.', help: 'Tìm câu trả lời và liên hệ đội ngũ hỗ trợ.', 'order-guide': 'Các bước chọn sản phẩm, xác nhận giỏ hàng và theo dõi đơn.', 'delivery-guide': 'Chọn cách nhận hàng, địa chỉ và khung giao phù hợp.', cart: 'Kiểm tra sản phẩm trước khi gửi đơn hàng.', checkout: 'Chọn địa chỉ và phương thức nhận hàng.' };
-  return map[page] || 'Quản lý hoạt động FreshFlow của bạn.';
-}
+  if (pathname === '/') return <HomePage products={products} addCart={addCart} money={money} cartCount={cartCount} />;
 
-function Dashboard({ admin, preview = false, products, orders, cart, addCart, go, money, statusTone }: { admin: boolean; preview?: boolean; products: Product[]; orders: Order[]; cart: Record<number, number>; addCart: (id: number) => void; go: (s: string) => void; money: (n: number) => string; statusTone: (s: string) => string; }) {
-  const customerOrders = admin ? orders : orders.filter(order => order.customer === 'Nguyễn Ngọc Anh');
-  if (!admin) return <><div className="mb-7 grid gap-4 md:grid-cols-3"><div className="md:col-span-2 panel relative overflow-hidden bg-white p-7"><img src="/images/store.jpg" alt="FreshFlow" className="absolute inset-y-0 right-0 h-full w-2/5 object-cover opacity-25" /><div className="relative z-10 max-w-[390px]"><Badge tone="green">Tươi mỗi ngày · Giao trong hôm nay</Badge><h2 className="mt-4 text-[27px] font-extrabold leading-tight text-[#244a34]">Ăn xanh hơn,<br />sống vui mỗi ngày.</h2><p className="mt-2 text-sm text-[#67816c]">Nông sản tươi ngon được chọn lọc kỹ càng, giao đến bạn nhanh chóng.</p><button onClick={() => go('/products')} className="mt-5 rounded-xl bg-[#176b52] px-4 py-2.5 text-xs font-bold text-white">Khám phá sản phẩm <FontAwesomeIcon icon={faArrowRight} className="ml-2" /></button></div></div><div className="panel flex flex-col justify-between p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold">{preview ? 'Đặt hàng' : 'Đơn hàng của tôi'}</span><FontAwesomeIcon icon={faClipboardList} className="text-[#79a389]" /></div><div><div className="text-[30px] font-extrabold">{preview ? '\u2014' : '02'}</div><p className="text-xs text-[#849088]">{preview ? 'Đăng nhập để tạo và theo dõi đơn hàng.' : '1 đơn đang chờ duyệt'}</p></div><button onClick={() => go(preview ? '/login' : '/orders')} className="text-left text-xs font-bold text-[#176b52]">{preview ? 'Đăng nhập để đặt hàng' : 'Xem đơn hàng'} <FontAwesomeIcon icon={faArrowRight} className="ml-1" /></button></div></div><section><div className="mb-4 flex items-end justify-between"><div><h2 className="text-lg font-extrabold">Hôm nay ăn gì?</h2><p className="mt-1 text-xs text-[#8b968f]">Sản phẩm tươi mới, giá tốt cho nhóm sinh viên</p></div><button onClick={() => go('/products')} className="text-xs font-bold text-[#176b52]">Xem tất cả <FontAwesomeIcon icon={faArrowRight} className="ml-1" /></button></div><ProductGrid products={products.slice(0, 4)} addCart={addCart} money={money} cart={cart} /></section><QuickOrder orderCount={orders.length} preview={preview} go={go} /></>;
-  return <><div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[{ label: 'Doanh thu hôm nay', value: '8.420.000₫', change: '+12,8%', icon: faCreditCard, color: 'green' }, { label: 'Đơn hàng mới', value: '24', change: '+8 đơn', icon: faClipboardList, color: 'blue' }, { label: 'Sản phẩm đang bán', value: '68', change: '4 sắp hết', icon: faAppleWhole, color: 'orange' }, { label: 'Khách hàng', value: '1.284', change: '+32 tháng này', icon: faUsers, color: 'purple' }].map((x, i) => <div className="panel p-5" key={x.label}><div className="flex items-start justify-between"><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${i === 0 ? 'bg-white text-emerald-700' : i === 1 ? 'bg-white text-sky-700' : i === 2 ? 'bg-white text-amber-700' : 'bg-white text-violet-700'}`}><FontAwesomeIcon icon={x.icon} /></div><Badge tone="green">{x.change}</Badge></div><div className="mt-4 text-[25px] font-extrabold tracking-tight">{x.value}</div><div className="mt-1 text-xs text-[#87938b]">{x.label}</div></div>)}</div><div className="mb-6 grid gap-5 xl:grid-cols-[1.55fr_1fr]"><div className="panel p-5"><div className="mb-5 flex items-center justify-between"><div><h2 className="font-bold">Tổng quan doanh thu</h2><p className="mt-1 text-[11px] text-[#8c9890]">Hiệu suất kinh doanh trong tuần này</p></div><select className="rounded-lg border border-[#e5eae5] bg-white px-2 py-2 text-xs"><option>7 ngày qua</option><option>30 ngày qua</option><option>Tháng này</option></select></div><RevenueChart /></div><div className="panel p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold">Tình trạng tồn kho</h2><p className="mt-1 text-[11px] text-[#8c9890]">Theo dõi mức hàng hiện tại</p></div><button onClick={() => go('/inventory')} className="text-xs font-bold text-[#176b52]">Chi tiết</button></div><div className="space-y-4">{products.slice(0, 4).map(p => <div key={p.id}><div className="mb-1.5 flex justify-between text-xs"><span className="font-semibold">{p.name}</span><span className={p.available < 10 ? 'text-rose-600' : 'text-[#829087]'}>{p.available} {p.unit}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-white"><div className={`h-full rounded-full ${p.available < 10 ? 'bg-rose-400' : 'bg-[#6da882]'}`} style={{ width: `${Math.min(p.available / 70 * 100, 100)}%` }} /></div></div>)}</div><button onClick={() => go('/inventory')} className="mt-5 w-full rounded-lg bg-white py-2 text-xs font-bold text-[#4c6c57]">Xem báo cáo tồn kho</button></div></div><div className="panel overflow-hidden"><div className="flex items-center justify-between border-b border-[#edf0ed] px-5 py-4"><div><h2 className="font-bold">Đơn hàng gần đây</h2><p className="mt-1 text-[11px] text-[#8c9890]">Cập nhật trực tiếp theo thời gian thực</p></div><button onClick={() => go('/orders')} className="text-xs font-bold text-[#176b52]">Tất cả đơn hàng <FontAwesomeIcon icon={faArrowRight} className="ml-1" /></button></div><OrderTable orders={orders.slice(0, 4)} admin={admin} statusTone={statusTone} money={money} /></div><div className="mt-5 grid gap-4 sm:grid-cols-3"><div className="panel flex items-center gap-4 p-4"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-amber-600"><FontAwesomeIcon icon={faMessage} /></div><div><div className="text-lg font-extrabold">3</div><div className="text-xs text-slate-500">Yêu cầu cần xử lý</div></div></div><div className="panel flex items-center gap-4 p-4"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-rose-600"><FontAwesomeIcon icon={faSliders} /></div><div><div className="text-lg font-extrabold">2</div><div className="text-xs text-slate-500">Cảnh báo kiểm duyệt</div></div></div><div className="panel flex items-center gap-4 p-4"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-sky-600"><FontAwesomeIcon icon={faTruck} /></div><div><div className="text-lg font-extrabold">6</div><div className="text-xs text-slate-500">Đơn đang vận chuyển</div></div></div></div></>;
-}
-function RevenueChart() {
-  const vals = [44, 68, 54, 82, 61, 93, 72];
-  return <div className="relative h-[190px] pt-4"><div className="absolute inset-0 flex flex-col justify-between pb-6">{['10tr', '7,5tr', '5tr', '2,5tr', '0'].map(x => <div key={x} className="flex items-center gap-3"><span className="w-8 text-[9px] text-[#a0aaa3]">{x}</span><div className="h-px flex-1 border-t border-dashed border-[#e9ede9]" /></div>)}</div><div className="absolute bottom-6 left-12 right-3 flex h-[145px] items-end justify-around">{vals.map((v, i) => <div key={i} className="group flex h-full w-[8%] flex-col justify-end"><div className="mb-2 rounded-t-md bg-[#a4c9ad] transition hover:bg-[#4c9568]" style={{ height: `${v}%` }} /><span className="mt-2 text-center text-[9px] text-[#9aa49c]">{['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'][i]}</span></div>)}</div></div>;
-}
+  return (
+    <div className="min-h-screen bg-[#fcfdfc]">
+      {/* Desktop Sidebar */}
+      <aside className="desktop-sidebar fixed inset-y-0 left-0 z-20 flex w-[260px] flex-col border-r border-[#e8ede8] bg-white px-5 py-6 shadow-sm">
+        <Link href={admin ? '/admin/dashboard' : shop ? '/shop' : shipper ? '/shipper' : '/dashboard'} className="mb-7 flex items-center gap-3 px-2">
+          <div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#176b52] text-white shadow-sm">
+            <FontAwesomeIcon icon={faSeedling} />
+          </div>
+          <div>
+            <div className="text-[18px] font-extrabold tracking-tight text-[#1a2e24]">
+              freshflow<span className="text-[#43967b]">.</span>
+            </div>
+            <div className="text-[10px] font-bold uppercase tracking-[.16em] text-[#97a29b]">Nông sản mỗi ngày</div>
+          </div>
+        </Link>
 
-function InventoryView({ products, money, adjust }: { products: Product[]; money: (n: number) => string; adjust: AdjustStock; }) {
-  const low = products.filter(product => product.available < 10).length;
-  return <><div className="mb-5 grid gap-4 sm:grid-cols-3">{[['Mặt hàng đang theo dõi', String(products.length)], ['Sắp hết hàng', String(low)], ['Đơn vị đang chờ duyệt', String(products.reduce((sum, p) => sum + p.ordered, 0))]].map(item => <div key={item[0]} className="panel p-5"><div className="text-xs text-slate-500">{item[0]}</div><div className="mt-2 text-2xl font-extrabold">{item[1]}</div></div>)}</div><div className="panel overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b p-4"><div><h2 className="text-sm font-bold">Tồn kho theo đợt hàng hôm nay</h2><p className="mt-1 text-[11px] text-slate-400">Khả dụng = số lượng ban đầu − số lượng đã duyệt.</p></div><span className="text-[10px] text-slate-400">Số chờ duyệt chưa được tính là đã bán</span></div><div className="overflow-auto"><table className="w-full min-w-[760px] text-left text-xs"><thead className="bg-white text-[10px] uppercase text-slate-400"><tr>{['Mặt hàng', 'Ban đầu', 'Đã duyệt / bán', 'Đang chờ duyệt', 'Khả dụng', 'Giá trị tồn', 'Điều chỉnh'].map(x => <th key={x} className="px-5 py-3">{x}</th>)}</tr></thead><tbody>{products.map(product => <tr key={product.id} className="border-t"><td className="px-5 py-3 font-bold"><ProductPhoto product={product} className="!h-10 !w-10 shrink-0 align-middle" /> {product.name}</td><td className="px-5">{product.available + product.approved} {product.unit}</td><td className="px-5 text-[#537b5e]">{product.approved} {product.unit}</td><td className="px-5 text-amber-600">{product.ordered} {product.unit}</td><td className="px-5 font-extrabold">{product.available} {product.unit}</td><td className="px-5 text-slate-500">{money(product.available * product.price)}</td><td className="px-5 py-3 align-top"><InventoryAdjustment id={product.id} name={product.name} unit={product.unit} available={product.available} adjust={adjust} /></td></tr>)}</tbody></table></div></div></>;
-}
-function QuickOrder({ orderCount, preview = false, go }: { orderCount: number; preview?: boolean; go: (s: string) => void; }) {
-  return <div className="mt-6 flex items-center justify-between rounded-2xl bg-white p-5"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-[#4a815b]"><FontAwesomeIcon icon={faTruck} /></div><div><div className="text-sm font-bold">Đơn hàng của bạn</div><div className="mt-1 text-xs text-slate-500">{preview ? 'Đăng nhập để tạo và theo dõi đơn hàng.' : `${orderCount} đơn hàng · Cập nhật trạng thái realtime`}</div></div></div><Button kind="secondary" onClick={() => go(preview ? '/login' : '/orders')}>{preview ? 'Đăng nhập' : 'Theo dõi đơn'} <FontAwesomeIcon icon={faArrowRight} /></Button></div>;
-}
+        {/* Current Role Card */}
+        <div className="mb-5 rounded-2xl bg-[#f6faf7] border border-[#e2ece5] p-3">
+          <div className="mb-1.5 text-[9px] font-extrabold uppercase tracking-[.14em] text-[#869b8f]">VAI TRÒ HIỆN TẠI</div>
+          <div className="flex w-full items-center gap-2.5 rounded-xl bg-white p-2.5 text-left shadow-sm">
+            <div className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm ${admin ? 'bg-emerald-100 text-emerald-800' : shop ? 'bg-amber-100 text-amber-800' : shipper ? 'bg-blue-100 text-blue-800' : 'bg-teal-100 text-teal-800'}`}>
+              <FontAwesomeIcon icon={admin ? faUserGroup : shop ? faStore : shipper ? faMotorcycle : faUser} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-extrabold text-[#1f2d25] truncate">
+                {admin ? 'Quản trị viên (Admin)' : shop ? 'Cửa hàng (Shop)' : shipper ? 'Giao hàng (Shipper)' : 'Khách hàng'}
+              </div>
+              <div className="text-[10px] text-[#89958e] truncate">
+                {currentUser?.full_name || ''}
+              </div>
+            </div>
+          </div>
+        </div>
 
-function Products({ admin, products, category, setCategory, addCart, money, open, go }: { admin: boolean; products: Product[]; category: string; setCategory: (s: string) => void; addCart: (n: number) => void; money: (n: number) => string; open: () => void; go: (path: string) => void; }) {
-  return <><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap gap-2">{['Tất cả', 'Trái cây', 'Rau củ', 'Thực phẩm'].map(c => <button key={c} onClick={() => setCategory(c)} className={`rounded-xl px-4 py-2 text-xs font-semibold ${c === category ? 'bg-[#176b52] text-white' : 'border border-[#e5eae5] bg-white text-[#6f7c73]'}`}>{c}</button>)}</div><div className="flex gap-2"><Button kind="secondary"><FontAwesomeIcon icon={faFilter} /> Bộ lọc</Button>{admin && <Button onClick={open}><FontAwesomeIcon icon={faPlus} /> Thêm sản phẩm</Button>}</div></div>{admin ? <div className="panel overflow-hidden"><div className="flex justify-between border-b p-4"><div><b className="text-sm">Danh mục sản phẩm</b><span className="ml-2 text-xs text-slate-400">{products.length} mặt hàng</span></div><button className="text-xs text-[#176b52]">Xuất danh sách</button></div><div className="overflow-auto"><table className="w-full text-left text-xs"><thead className="bg-white text-[10px] uppercase tracking-wide text-slate-400"><tr>{['Sản phẩm', 'Danh mục', 'Giá bán', 'Khả dụng', 'Đang chờ', 'Trạng thái', ''].map(x => <th key={x} className="px-5 py-3 font-bold">{x}</th>)}</tr></thead><tbody>{products.map(p => <tr key={p.id} className="border-t border-[#f0f2ef]"><td className="px-5 py-3"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl text-2xl" style={{ background: "#ffffff" }}><ProductPhoto product={p} className="!h-10 !w-10 shrink-0 align-middle" /></div><div><b>{p.name}</b><div className="mt-1 text-[10px] text-slate-400">SKU-00{p.id} · / {p.unit}</div></div></div></td><td className="px-5 text-slate-500">{p.category}</td><td className="px-5 font-semibold">{money(p.price)}</td><td className="px-5"><b className={p.available < 10 ? 'text-rose-600' : 'text-[#40564a]'}>{p.available}</b> {p.unit}</td><td className="px-5 text-slate-500">{p.ordered} đơn vị</td><td className="px-5"><Badge tone={p.available < 10 ? 'orange' : 'green'}>{p.available < 10 ? 'Sắp hết hàng' : 'Đang bán'}</Badge></td><td className="px-5"><button className="p-2 text-slate-400"><FontAwesomeIcon icon={faEllipsis} /></button></td></tr>)}</tbody></table></div></div> : <ProductGrid products={products} addCart={addCart} money={money} cart={{}} go={go} />}</>;
-}
-function Orders({ admin, orders, setOrders, statusTone, money, tab, setTab, notify }: { admin: boolean; orders: Order[]; setOrders: (fn: (v: Order[]) => Order[]) => void; statusTone: (s: string) => string; money: (n: number) => string; tab: string; setTab: (s: string) => void; notify: (s: string) => void; }) {
-  const tabs = ['Tất cả', 'Chờ duyệt', 'Đang chuẩn bị', 'Đang giao', 'Hoàn thành'];
-  const shown = orders.filter(o => (tab === 'Tất cả' || o.status === tab));
-  return <><div className="mb-4 flex gap-2 overflow-auto">{tabs.map(t => <button onClick={() => setTab(t)} key={t} className={`whitespace-nowrap rounded-xl px-4 py-2 text-xs font-semibold ${tab === t ? 'bg-[#176b52] text-white' : 'bg-white text-[#77847b]'}`}>{t} {t === 'Chờ duyệt' && <span className="ml-1 rounded-full bg-white/20 px-1.5">{orders.filter(o => o.status === t).length}</span>}</button>)}</div><div className="panel overflow-hidden"><OrderTable orders={shown} admin={admin} statusTone={statusTone} money={money} />{admin && <div className="flex flex-wrap gap-2 border-t p-4"><span className="mr-auto self-center text-[11px] text-slate-400">Hiển thị {shown.length} trên {orders.length} đơn hàng</span>{shown.filter(o => o.status === 'Chờ duyệt').map(o => <React.Fragment key={o.id}><Button kind="secondary" className="!px-3 !py-2" onClick={() => { setOrders(v => v.map(x => x.id === o.id ? { ...x, status: 'Từ chối' } : x)); notify(`Đã từ chối ${o.id}`); }}>Từ chối {o.id}</Button><Button className="!px-3 !py-2" onClick={() => { setOrders(v => v.map(x => x.id === o.id ? { ...x, status: 'Đang chuẩn bị' } : x)); notify(`Đã duyệt ${o.id}`); }}><FontAwesomeIcon icon={faCheck} /> Duyệt {o.id}</Button></React.Fragment>)}</div>}</div></>;
-}
-function Inventory({ products, money, setProducts, notify }: { products: Product[]; money: (n: number) => string; setProducts: (fn: (p: Product[]) => Product[]) => void; notify: (s: string) => void; }) {
-  return <><div className="mb-5 grid gap-4 sm:grid-cols-3">{[['Tổng mặt hàng', '68'], ['Sắp hết hàng', '4'], ['Đơn vị đang chờ duyệt', '52']].map(x => <div key={x[0]} className="panel p-5"><div className="text-xs text-slate-500">{x[0]}</div><div className="mt-2 text-2xl font-extrabold">{x[1]}</div></div>)}</div><div className="panel overflow-hidden"><div className="flex items-center justify-between border-b p-4"><div><h2 className="text-sm font-bold">Tồn kho theo đợt hàng hôm nay</h2><p className="mt-1 text-[11px] text-slate-400">Số lượng khả dụng = ban đầu − đã duyệt</p></div><Button onClick={() => notify('Đã lưu điều chỉnh tồn kho')}><FontAwesomeIcon icon={faPlus} /> Thêm đợt hàng</Button></div><div className="overflow-auto"><table className="w-full min-w-[760px] text-left text-xs"><thead className="bg-white text-[10px] uppercase text-slate-400"><tr>{['Mặt hàng', 'Ban đầu', 'Đã duyệt / bán', 'Đang chờ duyệt', 'Khả dụng', 'Điều chỉnh'].map(x => <th key={x} className="px-5 py-3">{x}</th>)}</tr></thead><tbody>{products.map(p => <tr key={p.id} className="border-t"><td className="px-5 py-3 font-bold"><ProductPhoto product={p} className="!h-10 !w-10 shrink-0 align-middle" /> {p.name}</td><td className="px-5">{p.available + p.approved} {p.unit}</td><td className="px-5 text-[#537b5e]">{p.approved} {p.unit}</td><td className="px-5 text-amber-600">{p.ordered} {p.unit}</td><td className="px-5 font-extrabold">{p.available} {p.unit}</td><td className="px-5"><button onClick={() => { setProducts(v => v.map(x => x.id === p.id ? { ...x, available: x.available + 5 } : x)); notify(`Đã cộng 5 ${p.unit} vào ${p.name}`); }} className="rounded-lg border px-2 py-1.5 text-[10px] font-bold text-[#176b52]">+5 đơn vị</button></td></tr>)}</tbody></table></div></div></>;
-}
-function Deliveries({ orders, money, change, statusTone }: { orders: Order[]; money: (n: number) => string; change: (id: string, s: string) => void; statusTone: (s: string) => string; }) {
-  const items = orders.filter(x => ['Đang chuẩn bị', 'Đang giao'].includes(x.status));
-  return <div className="grid gap-5 xl:grid-cols-[1fr_320px]"><div className="space-y-3">{items.map((o, i) => <div className="panel flex flex-wrap items-center gap-4 p-5" key={o.id}><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-[#4b7c59]"><FontAwesomeIcon icon={faTruck} /></div><div className="min-w-[180px] flex-1"><div className="flex items-center gap-2"><b className="text-sm">{o.id}</b><Badge tone={statusTone(o.status)}>{o.status}</Badge></div><div className="mt-1 text-xs text-slate-500">{o.customer} · {o.delivery}</div><div className="mt-1 text-[10px] text-slate-400">{o.items} · {money(o.total)}</div></div><Button kind="secondary" onClick={() => change(o.id, o.status === 'Đang chuẩn bị' ? 'Đang giao' : 'Hoàn thành')}>{o.status === 'Đang chuẩn bị' ? 'Bắt đầu giao' : 'Hoàn tất giao'} <FontAwesomeIcon icon={faArrowRight} /></Button></div>)}</div><div className="panel p-5"><h3 className="font-bold">Điểm giao tập trung</h3><div className="mt-4 rounded-xl bg-white p-4"><b className="text-sm">Ký túc xá khu A</b><p className="mt-1 text-xs text-slate-500">Đại học Quốc gia · 11:30–12:00</p></div><div className="mt-4 flex justify-between text-xs"><span className="text-slate-500">Đơn tại điểm này</span><b>8 đơn</b></div><Button kind="secondary" className="mt-4 w-full" onClick={() => alert('Bản đồ điểm giao tập trung')}>Xem điểm giao</Button></div></div>;
-}
-function Customers({ notify }: { notify: (s: string) => void; }) {
-  const customers = [['NA', 'Nguyễn Minh Anh', 'minhanh@email.com', 'Sinh viên', '24', 'Hoạt động'], ['TH', 'Trần Hoàng Nam', 'hoangnam@email.com', 'Người đi làm', '18', 'Hoạt động'], ['LTH', 'Lê Thu Hà', 'thuha@email.com', 'Sinh viên', '12', 'Hoạt động'], ['PQH', 'Phạm Quang Huy', 'quanghuy@email.com', 'Người đi làm', '8', 'Tạm khóa'], ['DNL', 'Đỗ Ngọc Linh', 'ngoclinh@email.com', 'Sinh viên', '31', 'Hoạt động']];
-  return <div className="panel overflow-hidden"><div className="flex items-center justify-between border-b p-4"><div><b className="text-sm">Danh sách khách hàng</b><p className="mt-1 text-[11px] text-slate-400">Quản lý nhóm và trạng thái tài khoản</p></div><Button onClick={() => notify('Đã mở biểu mẫu mời khách hàng')}><FontAwesomeIcon icon={faPlus} /> Mời khách hàng</Button></div><div className="overflow-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-white text-[10px] uppercase text-slate-400"><tr>{['Khách hàng', 'Nhóm khách hàng', 'Đơn hàng', 'Tham gia', 'Trạng thái', ''].map(x => <th key={x} className="px-5 py-3">{x}</th>)}</tr></thead><tbody>{customers.map((c, i) => <tr key={c[1]} className="border-t"><td className="px-5 py-3"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-[10px] font-bold text-[#4f7655]">{c[0]}</div><div><b>{c[1]}</b><div className="mt-1 text-[10px] text-slate-400">{c[2]}</div></div></div></td><td className="px-5"><Badge tone={c[3] === 'Sinh viên' ? 'blue' : 'gray'}>{c[3]}</Badge></td><td className="px-5">{c[4]}</td><td className="px-5 text-slate-500">{['12/08/24', '21/07/24', '02/08/24', '15/06/24', '11/08/24'][i]}</td><td className="px-5"><Badge tone={c[5] === 'Hoạt động' ? 'green' : 'red'}>{c[5]}</Badge></td><td className="px-5"><button onClick={() => notify(`Mở hồ sơ ${c[1]}`)}><FontAwesomeIcon icon={faEllipsis} /></button></td></tr>)}</tbody></table></div></div>;
-}
+        {/* Nav Links */}
+        <nav className="scrollbar-hide flex-1 space-y-5 overflow-y-auto pr-1">
+          {links.map(section => (
+            <div key={section.label}>
+              <div className="mb-2 px-3 text-[9px] font-extrabold tracking-[.16em] text-[#a2aca5]">{section.label}</div>
+              <div className="space-y-1">{section.links.map((item: any) => link(item.href, item.name, item.icon, item.count))}</div>
+            </div>
+          ))}
+        </nav>
 
-function CustomersView({ notify, apiState }: { notify: (s: string) => void; apiState: string; }) {
-  type Customer = { id: number; initials: string; name: string; email: string; group: string; orders: number | null; status: string; };
-  const [query, setQuery] = useState('');
-  const [customers, setCustomers] = useState<Customer[]>(demoCustomers);
-  useEffect(() => { const reveal = () => { if (!window.location.hash.startsWith('#customer-')) return; setQuery(''); requestAnimationFrame(() => document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: 'center' })); }; reveal(); window.addEventListener('hashchange', reveal); return () => window.removeEventListener('hashchange', reveal); }, [customers]);
-  useEffect(() => { if (apiState !== 'live') return; let alive = true; setCustomers([]); api.get<any>(endpoints.customers).then(result => { if (alive) setCustomers(unwrapList<any>(result).map(item => ({ id: Number(item.id), initials: (item.full_name || item.name || '?').split(' ').map((part: string) => part[0]).join('').slice(0, 3), name: item.full_name || item.name || '', email: item.email || '', group: item.customer_group?.name || item.customer_group || '', orders: typeof item.order_count === 'number' ? item.order_count : null, status: item.is_active === true ? 'Hoạt động' : item.is_active === false ? 'Tạm khóa' : item.status === 'SUSPENDED' ? 'Tạm khóa' : item.status === 'ACTIVE' ? 'Hoạt động' : item.status || '' }))); }).catch(() => { if (alive) notify('Không tải được danh sách khách hàng.'); }); return () => { alive = false; }; }, [apiState]);
-  const visible = customers.filter(customer => `${customer.name} ${customer.email}`.toLowerCase().includes(query.toLowerCase()));
-  const toggle = async (customer: Customer) => { const status = customer.status === 'Hoạt động' ? 'Tạm khóa' : 'Hoạt động'; if (apiState === 'live') { try { await freshflow.userStatus(customer.id, status === 'Hoạt động'); } catch (error) { notify(error instanceof Error ? error.message : 'Không cập nhật được tài khoản'); return; } } setCustomers(current => current.map(item => item.id === customer.id ? { ...item, status } : item)); notify(apiState === 'live' ? 'Đã cập nhật trạng thái tài khoản.' : 'Bản demo: đã cập nhật trạng thái tài khoản.'); };
-  return <div className="panel overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b p-4"><div><b className="text-sm">Danh sách khách hàng</b><p className="mt-1 text-[11px] text-slate-400">Tài khoản, nhóm áp dụng và lịch sử đơn hàng.</p></div><div className="flex gap-2"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Tìm khách hàng" className="rounded-xl border px-3 py-2 text-xs" /><Button onClick={() => notify('Mời khách hàng cần tích hợp dịch vụ email/SMS.')}><FontAwesomeIcon icon={faPlus} /> Mời khách hàng</Button></div></div><div className="overflow-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-white text-[10px] uppercase text-slate-400"><tr>{['Khách hàng', 'Nhóm khách hàng', 'Đơn hàng', 'Trạng thái', 'Tác vụ'].map(x => <th key={x} className="px-5 py-3">{x}</th>)}</tr></thead><tbody>{visible.map(customer => <tr id={`customer-${customer.id}`} key={customer.id} className="scroll-mt-24 border-t target:bg-emerald-50"><td className="px-5 py-3"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-[10px] font-bold text-[#4f7655]">{customer.initials}</div><div><b>{customer.name}</b><div className="mt-1 text-[10px] text-slate-400">{customer.email}</div></div></div></td><td className="px-5"><Badge tone={customer.group === 'Sinh viên' ? 'blue' : 'gray'}>{customer.group}</Badge></td><td className="px-5">{customer.orders ?? '?'}</td><td className="px-5"><Badge tone={customer.status === 'Hoạt động' ? 'green' : 'red'}>{customer.status}</Badge></td><td className="px-5"><button onClick={() => toggle(customer)} className="font-bold text-[#176b52]">{customer.status === 'Hoạt động' ? 'Tạm khóa' : 'Mở khóa'}</button></td></tr>)}</tbody></table></div><div className="border-t p-4 text-[10px] text-slate-400">Tài khoản đã khóa không thể đặt đơn sau khi backend xác thực trạng thái người dùng.</div></div>;
-}
-function Requests({ admin, notify, open }: { admin: boolean; notify: (s: string) => void; open: () => void; }) {
-  const rows = [['Táo xanh Granny Smith', 'Trái cây', '12 kg', 'Nguyễn Minh Anh', 'Hôm nay, 09:12', 'Mới'], ['Sữa hạt không đường', 'Thực phẩm', '8 hộp', 'Trần Hoàng Nam', 'Hôm nay, 08:34', 'Đang xử lý'], ['Nấm đùi gà hữu cơ', 'Rau củ', '5 kg', 'Lê Thu Hà', 'Hôm qua, 16:20', 'Mới'], ['Mật ong hoa cà phê', 'Thực phẩm', '3 chai', 'Phạm Quang Huy', 'Hôm qua, 15:08', 'Đã báo giá']];
-  return <><div className="mb-5 grid gap-4 sm:grid-cols-3">{[['Yêu cầu mới', '3'], ['Đang xử lý', '5'], ['Đã hoàn tất', '12']].map(x => <div key={x[0]} className="panel p-4"><span className="text-xs text-slate-500">{x[0]}</span><div className="mt-2 text-2xl font-extrabold">{x[1]}</div></div>)}</div><div className="panel overflow-hidden"><div className="flex justify-between border-b p-4"><div><b className="text-sm">Yêu cầu gần đây</b><p className="mt-1 text-[11px] text-slate-400">Khách hàng đề xuất mặt hàng chưa có trong danh mục</p></div>{!admin && <Button onClick={open}><FontAwesomeIcon icon={faPlus} /> Tạo yêu cầu</Button>}</div><div className="overflow-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-white text-[10px] uppercase text-slate-400"><tr>{['Mặt hàng mong muốn', 'Danh mục', 'Số lượng', 'Người yêu cầu', 'Thời gian', 'Trạng thái', ''].map(x => <th key={x} className="px-5 py-3">{x}</th>)}</tr></thead><tbody>{rows.map((r, i) => <tr key={r[0]} className="border-t"><td className="px-5 py-4 font-bold">{r[0]}</td><td className="px-5 text-slate-500">{r[1]}</td><td className="px-5">{r[2]}</td><td className="px-5">{admin ? r[3] : 'Bạn'}</td><td className="px-5 text-slate-400">{r[4]}</td><td className="px-5"><Badge tone={r[5] === 'Mới' ? 'orange' : r[5] === 'Đã báo giá' ? 'green' : 'blue'}>{i === 1 && !admin ? 'Đang xử lý' : r[5]}</Badge></td><td className="px-5">{admin && <button onClick={() => notify(`Đã mở báo giá cho ${r[0]}`)} className="font-bold text-[#176b52]">Báo giá</button>}</td></tr>)}</tbody></table></div></div></>;
-}
+        {/* Support Card */}
+        <div className="mt-4 rounded-2xl bg-[#f2f8f4] border border-[#dceddf] p-3 text-xs">
+          <div className="mb-1 flex items-center gap-2 font-bold text-[#1b503d]">
+            <FontAwesomeIcon icon={faCircleQuestion} /> Trợ giúp & Kết nối
+          </div>
+          <p className="text-[11px] leading-relaxed text-[#5f7a6a]">Hỗ trợ kỹ thuật và giải đáp thắc mắc 24/7.</p>
+          <button onClick={() => openChatWith()} className="mt-2 text-[11px] font-bold text-[#176b52] hover:underline flex items-center gap-1">
+            Mở khung chat hỗ trợ <FontAwesomeIcon icon={faArrowRight} className="text-[9px]" />
+          </button>
+        </div>
 
-function Reports({ money }: { money: (n: number) => string; }) {
-  return <><div className="mb-5 flex gap-2"><select className="rounded-xl border bg-white px-3 py-2 text-xs"><option>Tháng 9, 2024</option><option>Tháng 8, 2024</option></select><Button kind="secondary"><FontAwesomeIcon icon={faArrowRight} /> Xuất báo cáo</Button></div><div className="mb-5 grid gap-4 md:grid-cols-4">{[['Tổng doanh thu', money(68420000), '+12,8%'], ['Đơn hàng hoàn thành', '486', '+8,2%'], ['Giá trị trung bình', money(140782), '+4,1%'], ['Tỷ lệ hoàn thành', '96,4%', '+1,3%']].map(x => <div key={x[0]} className="panel p-5"><div className="text-xs text-slate-500">{x[0]}</div><div className="my-2 text-xl font-extrabold">{x[1]}</div><Badge tone="green">↑ {x[2]}</Badge></div>)}</div><div className="grid gap-5 xl:grid-cols-[1.5fr_1fr]"><div className="panel p-5"><h3 className="font-bold">Doanh thu theo ngày</h3><p className="mt-1 text-xs text-slate-400">Tổng doanh thu trong tháng 9</p><div className="mt-6"><RevenueChart /></div></div><div className="panel p-5"><h3 className="font-bold">Sản phẩm bán chạy</h3>{[['', 'Bơ sáp Đắk Lắk', '182 kg'], ['', 'Cà chua bi hữu cơ', '146 hộp'], ['', 'Trứng gà thả vườn', '128 vỉ'], ['', 'Chuối cau chín cây', '96 nải']].map((x, i) => <div key={x[1]} className="flex items-center gap-3 border-b py-4 last:border-0"><ProductPhoto product={{ name: x[1] }} className="!h-10 !w-10 rounded-xl" /><b className="flex-1 text-xs">{x[1]}</b><span className="text-xs text-slate-500">{x[2]}</span><Badge tone={i === 0 ? 'green' : 'gray'}>#{i + 1}</Badge></div>)}</div></div></>;
-}
+        <button onClick={logout} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2 text-xs font-semibold text-[#7e8a82] hover:bg-slate-50">
+          <FontAwesomeIcon icon={faRightFromBracket} /> Đăng xuất
+        </button>
+      </aside>
 
-function ReportsPanel({ money, apiState, orders }: { money: (value: number) => string; apiState: string; orders: Order[]; }) {
-  type Summary = { revenue: number; completed_orders: number; average_order_value: number; completion_rate: number; };
-  const [summary, setSummary] = useState<Summary>(apiState === 'live' ? { revenue: 0, completed_orders: 0, average_order_value: 0, completion_rate: 0 } : { revenue: 68420000, completed_orders: 486, average_order_value: 140782, completion_rate: 96.4 });
-  const [month, setMonth] = useState(() => salesMonth(new Date().toISOString()));
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { if (apiState !== 'live' || !month) return; let alive = true; setError(''); setBusy(true); setSummary({ revenue: 0, completed_orders: 0, average_order_value: 0, completion_rate: 0 }); const range = reportRange(month); freshflow.report<any>(range.date_from, range.date_to).then(result => { if (!alive) return; const rows = Array.isArray(result.orders_by_status) ? result.orders_by_status : []; const completedRow = rows.find((row: any) => String(row.status).toUpperCase() === 'COMPLETED'); const completedOrders = Number(result.completed_orders ?? result.orders_completed ?? completedRow?.count ?? 0); const revenue = Number(result.completed_revenue ?? result.revenue ?? result.total_revenue ?? 0); const allOrders = rows.reduce((sum: number, row: any) => sum + Number(row.count || 0), 0); setSummary({ revenue, completed_orders: completedOrders, average_order_value: Number(result.average_order_value ?? (completedOrders ? revenue / completedOrders : 0)), completion_rate: Number(result.completion_rate ?? (allOrders ? completedOrders / allOrders * 100 : 0)) }); }).catch(error => { if (alive) setError(error instanceof Error ? error.message : 'Không tải được báo cáo.'); }).finally(() => { if (alive) setBusy(false); }); return () => { alive = false; }; }, [apiState, month]);
-  const cards = [['Tổng doanh thu', money(summary.revenue)], ['Đơn hàng hoàn thành', String(summary.completed_orders)], ['Giá trị trung bình', money(summary.average_order_value)], ['Tỷ lệ hoàn thành', `${summary.completion_rate}%`]];
-  return <><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><label className="text-xs font-semibold text-slate-500">Kỳ báo cáo<input type="month" value={month} onChange={event => setMonth(event.target.value)} className="ml-2 rounded-xl border bg-white px-3 py-2 text-xs text-slate-700" /></label><Button kind="secondary" onClick={() => window.print()}><FontAwesomeIcon icon={faArrowRight} /> In báo cáo</Button></div><div className="mb-5 grid gap-4 md:grid-cols-4">{cards.map(card => <div key={card[0]} className="panel p-5"><div className="text-xs text-slate-500">{card[0]}</div><div className="my-2 text-xl font-extrabold">{busy ? '…' : error ? '—' : card[1]}</div><span className="text-[10px] text-slate-400">{error || (apiState === 'live' ? 'Theo dữ liệu backend' : 'Số liệu minh họa')}</span></div>)}</div><div className="grid gap-5 xl:grid-cols-[1.5fr_1fr]"><div className="panel p-5"><h3 className="font-bold">Doanh thu theo ngày</h3><p className="mt-1 text-xs text-slate-400">Biểu đồ minh họa; cần chuỗi dữ liệu ngày từ API để vẽ số liệu thực.</p><div className="mt-6"><RevenueChart /></div></div><ProductSalesRanking orders={orders} month={month} money={money} /></div></>;
-}
+      {/* Main Container */}
+      <main className="main-content min-h-screen pb-16 pl-[260px]">
+        {/* Top Header */}
+        <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-[#e9ede8] bg-white/90 px-8 backdrop-blur">
+          <div className="flex items-center gap-4">
+            <div className="text-[11px] font-medium text-[#98a39c]">
+              FreshFlow <span className="mx-1">/</span> <span className="font-bold text-[#45574d]">{title}</span>
+            </div>
 
-function Pricing({ notify, apiState, products }: { notify: (s: string) => void; apiState: string; products: Product[]; }) {
-  const defaults = Object.fromEntries(products.map(p => [p.id, { student: Math.round(p.price * .95), worker: p.price }])) as Record<number, { student: number; worker: number; }>;
-  const [prices, setPrices] = useState<Record<number, { student?: number; worker?: number; }>>(apiState === 'live' ? {} : defaults);
-  const [fees, setFees] = usePersistentState('freshflow-delivery-fees', { student: 0, worker: 25000 });
-  return <><div className="mb-5 grid gap-4 md:grid-cols-2"><div className="panel p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold"> Nhóm sinh viên</h3><p className="mt-1 text-xs text-slate-500">Giá ưu đãi và giao tại điểm tập trung.</p></div><Badge tone="green">Đang áp dụng</Badge></div><label className="mt-5 block text-xs font-semibold">Phí giao riêng (₫)<input disabled={apiState === 'live'} type="number" min="0" value={fees.student} onChange={e => setFees({ ...fees, student: Number(e.target.value) })} className="mt-2 w-full rounded-xl border p-3 text-xs" /></label></div><div className="panel p-5"><div className="flex items-center justify-between"><div><h3 className="font-bold"> Nhóm người đi làm</h3><p className="mt-1 text-xs text-slate-500">Giá tiêu chuẩn và giao riêng theo chính sách.</p></div><Badge tone="blue">Đang áp dụng</Badge></div><label className="mt-5 block text-xs font-semibold">Phí giao riêng (₫)<input disabled={apiState === 'live'} type="number" min="0" value={fees.worker} onChange={e => setFees({ ...fees, worker: Number(e.target.value) })} className="mt-2 w-full rounded-xl border p-3 text-xs" /></label></div></div><div className="panel overflow-hidden"><div className="border-b p-5"><h3 className="font-bold">Giá theo sản phẩm và nhóm khách hàng</h3><p className="mt-1 text-xs text-slate-500">Giá tại thời điểm đặt hàng cần được backend xác nhận và lưu snapshot.</p></div><div className="overflow-auto"><table className="w-full min-w-[680px] text-left text-xs"><thead className="bg-white text-[10px] uppercase text-slate-400"><tr>{['Sản phẩm', 'Giá niêm yết', 'Sinh viên', 'Người đi làm', ''].map(x => <th key={x} className="px-5 py-3">{x}</th>)}</tr></thead><tbody>{products.map(p => <tr key={p.id} className="border-t"><td className="px-5 py-3 font-bold"><ProductPhoto product={p} className="!h-10 !w-10 shrink-0 align-middle" /> {p.name}</td><td className="px-5 text-slate-500">{money(p.price)}</td>{(['student', 'worker'] as const).map(group => <td key={group} className="px-5"><input aria-label={`${p.name} ${group}`} type="number" min="0" value={prices[p.id]?.[group] ?? (apiState === 'live' ? '' : p.price)} placeholder={apiState === 'live' ? 'Nhập giá mới' : undefined} onChange={e => setPrices({ ...prices, [p.id]: { ...prices[p.id], [group]: Number(e.target.value) } })} className="w-32 rounded-lg border px-2 py-2" /></td>)}<td className="px-5"><Badge tone="green">Theo nhóm</Badge></td></tr>)}</tbody></table></div><div className="flex justify-end border-t p-4"><Button onClick={async () => { if (apiState !== 'live') { notify('Da luu gia demo.'); return; } try { await Promise.all(products.flatMap(product => (['student', 'worker'] as const).filter(group => prices[product.id]?.[group] !== undefined).map(group => freshflow.price(product.id, group === 'student' ? 'STUDENT' : 'WORKING', prices[product.id]![group]!)))); notify('Đã lưu các giá vừa nhập. Phí giao hàng được cấu hình riêng qua khung giao hàng.'); } catch (error) { notify(error instanceof Error ? error.message : 'Khong luu duoc gia'); } }}>Lưu chính sách</Button></div></div></>;
-}
+          </div>
 
-function AuditLogs() {
-  const logs = [['18/09/2024 09:42', 'Minh Anh', 'Duyệt đơn hàng', 'FF-240918', 'Thành công'], ['18/09/2024 09:18', 'Minh Anh', 'Điều chỉnh tồn kho', 'Rau cải kale · +10 bó', 'Thành công'], ['17/09/2024 16:40', 'Minh Anh', 'Cập nhật giá nhóm', 'Nhóm sinh viên', 'Thành công'], ['17/09/2024 14:02', 'Hệ thống', 'Cảnh báo kiểm duyệt', 'Tin nhắn #MSG-882', 'Cần xem xét'], ['16/09/2024 11:31', 'Minh Anh', 'Khóa tài khoản', 'USER-1042', 'Thành công']];
-  return <div className="panel overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b p-5"><div><h3 className="font-bold">Nhật ký thao tác quản trị</h3><p className="mt-1 text-xs text-slate-500">Theo dõi các hành động quan trọng và sự kiện an toàn.</p></div><div className="flex gap-2"><input type="date" className="rounded-lg border px-3 py-2 text-xs" /><Button kind="secondary"><FontAwesomeIcon icon={faFilter} /> Lọc</Button></div></div><div className="overflow-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-white text-[10px] uppercase text-slate-400"><tr>{['Thời gian', 'Người thực hiện', 'Thao tác', 'Đối tượng', 'Kết quả'].map(x => <th key={x} className="px-5 py-3">{x}</th>)}</tr></thead><tbody>{logs.map(row => <tr key={row.join('-')} className="border-t"><td className="px-5 py-4 text-slate-500">{row[0]}</td><td className="px-5 font-semibold">{row[1]}</td><td className="px-5">{row[2]}</td><td className="px-5 text-slate-500">{row[3]}</td><td className="px-5"><Badge tone={row[4] === 'Thành công' ? 'green' : 'orange'}>{row[4]}</Badge></td></tr>)}</tbody></table></div><div className="border-t p-4 text-center text-[10px] text-slate-400">Các dòng hiện là dữ liệu minh họa. Nhật ký chính thức phải được lấy từ backend và không thể sửa ở frontend.</div></div>;
-}
+          <div className="flex items-center gap-3">
+            <GlobalSearch key={`${admin}-${apiState}`} admin={admin} apiState={apiState} products={products} orders={orders} requests={requests} />
 
-function AuditLogPanel({ apiState }: { apiState: string; }) {
-  type Row = { id: string; time: string; actor: string; action: string; subject: string; result: string; };
-  const seed: Row[] = [{ id: 'a1', time: '18/09/2024 09:42', actor: 'Minh Anh', action: 'Duyệt đơn hàng', subject: 'FF-240918', result: 'Thành công' }, { id: 'a2', time: '18/09/2024 09:18', actor: 'Minh Anh', action: 'Điều chỉnh tồn kho', subject: 'Rau cải kale · +10 bó', result: 'Thành công' }, { id: 'a3', time: '17/09/2024 16:40', actor: 'Minh Anh', action: 'Cập nhật giá nhóm', subject: 'Nhóm sinh viên', result: 'Thành công' }];
-  const [rows, setRows] = useState(apiState === 'live' ? [] : seed);
-  const [error, setError] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  useEffect(() => { if (apiState !== 'live') return; setRows([]); setError(''); api.get<any>(endpoints.auditLogs).then(result => setRows(unwrapList(result).map((item: any, index: number) => ({ id: String(item.id || index), time: item.occurred_at || item.created_at || '—', actor: item.actor_name || item.actor?.full_name || 'Hệ thống', action: item.action || item.event_type || 'Sự kiện', subject: item.subject || item.entity_id || '—', result: item.result || 'Đã ghi nhận' })))).catch(error => setError(error instanceof Error ? error.message : 'Không tải được nhật ký.')); }, [apiState]);
-  const visible = rows.filter(row => { const day = row.time.slice(0, 10); return (!from || day >= from) && (!to || day <= to); });
-  return <div className="panel overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b p-5"><div><h3 className="font-bold">Nhật ký thao tác quản trị</h3><p className="mt-1 text-xs text-slate-500">{error || (apiState === 'live' ? 'Nhật ký do backend cung cấp.' : 'Dữ liệu minh họa, chỉ đọc.')}</p></div><div className="flex flex-wrap gap-2"><input aria-label="Từ ngày" type="date" value={from} onChange={event => setFrom(event.target.value)} className="rounded-lg border px-3 py-2 text-xs" /><input aria-label="Đến ngày" type="date" value={to} onChange={event => setTo(event.target.value)} className="rounded-lg border px-3 py-2 text-xs" /><Button kind="secondary" onClick={() => { setFrom(''); setTo(''); }}>Xóa lọc</Button></div></div><div className="overflow-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-white text-[10px] uppercase text-slate-400"><tr>{['Thời gian', 'Người thực hiện', 'Thao tác', 'Đối tượng', 'Kết quả'].map(value => <th key={value} className="px-5 py-3">{value}</th>)}</tr></thead><tbody>{visible.map(row => <tr key={row.id} className="border-t"><td className="px-5 py-4 text-slate-500">{row.time}</td><td className="px-5 font-semibold">{row.actor}</td><td className="px-5">{row.action}</td><td className="px-5 text-slate-500">{row.subject}</td><td className="px-5"><Badge tone={row.result.toLowerCase().includes('thành công') ? 'green' : 'orange'}>{row.result}</Badge></td></tr>)}</tbody></table>{visible.length === 0 && <div className="p-8 text-center text-xs text-slate-400">Không có sự kiện trong khoảng đã chọn.</div>}</div></div>;
-}
-function Moderation({ notify }: { notify: (s: string) => void; }) {
-  return <div className="grid gap-5 xl:grid-cols-[1fr_300px]"><div className="panel overflow-hidden"><div className="flex justify-between border-b p-4"><div><b className="text-sm">Nội dung cần xem xét</b><p className="mt-1 text-[11px] text-slate-400">Tin nhắn được bộ lọc tự động gắn cờ</p></div><Badge tone="red">2 cảnh báo mới</Badge></div>{[['TN', 'Trần Hoàng Nam', 'Tin nhắn chứa từ ngữ có thể vi phạm chính sách.', '10 phút trước', 'Từ khóa hạn chế'], ['PQH', 'Phạm Quang Huy', 'Ảnh đính kèm cần được kiểm tra thủ công.', '1 giờ trước', 'Ảnh cần xem xét'], ['NA', 'Nguyễn Minh Anh', 'Tin nhắn đã bị che nội dung nhạy cảm.', 'Hôm qua', 'Đã xử lý']].map((x, i) => <div key={x[1]} className="flex flex-wrap items-center gap-3 border-b p-4"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-xs font-bold text-rose-600">{x[0]}</div><div className="min-w-[180px] flex-1"><div className="flex items-center gap-2"><b className="text-xs">{x[1]}</b><Badge tone={i === 2 ? 'green' : 'orange'}>{x[4]}</Badge></div><div className="mt-1 text-xs text-slate-500">{x[2]}</div><div className="mt-1 text-[10px] text-slate-400">{x[3]}</div></div>{i < 2 && <><Button kind="secondary" className="!px-3 !py-2" onClick={() => notify('Đã bỏ qua cảnh báo')}>Bỏ qua</Button><Button kind="danger" className="!px-3 !py-2" onClick={() => notify('Đã ghi nhận vi phạm')}>Ghi nhận vi phạm</Button></>}</div>)}</div><div className="panel p-5"><h3 className="font-bold">Từ khóa hạn chế</h3><p className="mt-1 text-xs text-slate-400">Tin nhắn sẽ được rà soát khi khớp danh sách</p><div className="mt-4 flex flex-wrap gap-2">{['lừa đảo', 'spam', 'nội dung cấm', 'quảng cáo'].map(x => <span key={x} className="rounded-lg bg-white px-2.5 py-1.5 text-[10px]">{x} <button className="ml-1 text-slate-400">×</button></span>)}</div><div className="mt-4 flex gap-2"><input placeholder="Thêm từ khóa" className="min-w-0 flex-1 rounded-lg border px-3 text-xs outline-none" /><button onClick={() => notify('Đã thêm từ khóa')} className="rounded-lg bg-[#176b52] px-3 text-white"><FontAwesomeIcon icon={faPlus} /></button></div><div className="mt-5 rounded-xl bg-white p-3 text-[10px] leading-relaxed text-[#927341]">Nội dung vi phạm được che trước khi gửi và cảnh báo được lưu vào nhật ký.</div></div></div>;
-}
+            {/* Chat Icon Button */}
+            <button
+              onClick={() => openChatWith()}
+              className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#57695f] hover:bg-slate-50"
+              title="Mở tin nhắn trực tiếp"
+            >
+              <FontAwesomeIcon icon={faComments} className="text-sm text-[#176b52]" />
+            </button>
 
-function ModerationView({ notify, apiState }: { notify: (s: string) => void; apiState: string; }) {
-  type Alert = { id: number; initials: string; user: string; message: string; reason: string; time: string; };
-  const [alerts, setAlerts] = useState<Alert[]>([{ id: 1, initials: 'TN', user: 'Trần Hoàng Nam', message: 'Tin nhắn có từ ngữ được bộ lọc tự động gắn cờ.', reason: 'Từ khóa hạn chế', time: '10 phút trước' }, { id: 2, initials: 'PQH', user: 'Phạm Quang Huy', message: 'Ảnh đính kèm cần được kiểm tra thủ công.', reason: 'Ảnh cần xem xét', time: '1 giờ trước' }]);
-  const [terms, setTerms] = usePersistentState<string[]>('freshflow-moderation-terms', ['lừa đảo', 'spam', 'nội dung cấm', 'quảng cáo']);
-  useEffect(() => { if (apiState === 'live') { setAlerts([]); setTerms([]); } }, [apiState]);
-  const [term, setTerm] = useState('');
-  const [busyId, setBusyId] = useState<number | undefined>();
-  const act = async (alert: Alert, action: 'dismiss' | 'violation') => { setBusyId(alert.id); if (apiState === 'live') { try { throw new Error('API chua ho tro xu ly canh bao kiem duyet.'); } catch (error) { notify(error instanceof Error ? error.message : 'Không xử lý được cảnh báo'); setBusyId(undefined); return; } } setAlerts(current => current.filter(item => item.id !== alert.id)); notify(apiState === 'live' ? (action === 'violation' ? 'Đã ghi nhận vi phạm.' : 'Đã bỏ qua cảnh báo.') : 'Bản demo: cảnh báo đã được xử lý.'); setBusyId(undefined); };
-  const addTerm = async () => { const value = term.trim().toLocaleLowerCase('vi'); if (!value) return; if (terms.includes(value)) { notify('Từ khóa này đã tồn tại.'); return; } if (apiState === 'live') { try { await freshflow.addModerationTerm(value); } catch (error) { notify(error instanceof Error ? error.message : 'Khong them duoc tu khoa'); return; } } setTerms(current => [...current, value]); setTerm(''); notify(apiState === 'live' ? 'Đã thêm từ khóa trên máy chủ.' : 'Đã thêm từ khóa hạn chế vào bản demo.'); };
-  return <div className="grid gap-5 xl:grid-cols-[1fr_300px]"><div className="panel overflow-hidden"><div className="flex justify-between border-b p-4"><div><b className="text-sm">Nội dung cần xem xét</b><p className="mt-1 text-[11px] text-slate-400">Cảnh báo cần quản trị viên xử lý.</p></div><Badge tone={alerts.length ? 'red' : 'green'}>{alerts.length} cảnh báo mới</Badge></div>{alerts.length ? alerts.map(alert => <div key={alert.id} className="flex flex-wrap items-center gap-3 border-b p-4"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-xs font-bold text-rose-600">{alert.initials}</div><div className="min-w-[180px] flex-1"><div className="flex items-center gap-2"><b className="text-xs">{alert.user}</b><Badge tone="orange">{alert.reason}</Badge></div><div className="mt-1 text-xs text-slate-500">{alert.message}</div><div className="mt-1 text-[10px] text-slate-400">{alert.time}</div></div><Button disabled={busyId === alert.id} kind="secondary" className="!px-3 !py-2" onClick={() => act(alert, 'dismiss')}>Bỏ qua</Button><Button disabled={busyId === alert.id} kind="danger" className="!px-3 !py-2" onClick={() => act(alert, 'violation')}>Ghi nhận vi phạm</Button></div>) : <div className="p-12 text-center text-sm text-slate-500">{apiState === 'live' ? 'Hiện chưa hỗ trợ tải danh sách cảnh báo.' : 'Không còn cảnh báo cần xử lý.'}</div>}</div><div className="panel p-5"><h3 className="font-bold">Từ khóa hạn chế</h3><p className="mt-1 text-xs text-slate-400">Danh sách cần được kiểm tra ở backend trước khi phát tin nhắn.</p><div className="mt-4 flex flex-wrap gap-2">{terms.map(value => <span key={value} className="rounded-lg bg-white px-2.5 py-1.5 text-[10px]">{value}<button aria-label={`Xóa ${value}`} onClick={() => apiState === 'live' ? notify('Hiện chưa hỗ trợ xóa từ khóa.') : setTerms(current => current.filter(item => item !== value))} className="ml-2 text-slate-400">×</button></span>)}</div><div className="mt-4 flex gap-2"><input value={term} onChange={e => setTerm(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTerm()} placeholder="Thêm từ khóa" className="min-w-0 flex-1 rounded-lg border px-3 text-xs outline-none" /><button onClick={addTerm} className="rounded-lg bg-[#176b52] px-3 text-white"><FontAwesomeIcon icon={faPlus} /></button></div><div className="mt-5 rounded-xl bg-white p-3 text-[10px] leading-relaxed text-[#927341]">Giao diện chỉ quản lý danh sách. Lọc nội dung, che từ, lưu vi phạm và cảnh báo người gửi phải được thực hiện ở backend.</div></div></div>;
-}
-function Settings({ notify }: { notify: (s: string) => void; }) {
-  return <div className="grid gap-5 xl:grid-cols-[210px_1fr]"><div className="panel h-fit p-2">{['Thông tin cửa hàng', 'Nhóm khách hàng', 'Chính sách giá', 'Giao hàng', 'Thông báo', 'Bảo mật'].map((x, i) => <button key={x} className={`block w-full rounded-lg px-3 py-2.5 text-left text-xs ${i === 0 ? 'bg-white font-bold text-[#176b52]' : 'text-slate-500'}`}>{x}</button>)}</div><div className="panel p-6"><h2 className="font-bold">Thông tin cửa hàng</h2><p className="mt-1 text-xs text-slate-400">Cập nhật thông tin hiển thị với khách hàng.</p><div className="mt-6 grid gap-4 sm:grid-cols-2">{[['Tên cửa hàng', 'FreshFlow Market'], ['Email hỗ trợ', 'hello@freshflow.vn'], ['Số điện thoại', '090 123 4567'], ['Địa chỉ kho', 'Thủ Đức, TP. Hồ Chí Minh']].map(x => <label key={x[0]} className="text-xs font-semibold text-slate-600">{x[0]}<input defaultValue={x[1]} className="mt-2 w-full rounded-xl border border-[#e4e9e4] px-3 py-3 text-xs font-normal outline-none focus:border-[#8ab59a]" /></label>)}</div><div className="mt-5 rounded-xl bg-white p-4"><div className="flex items-center justify-between"><div><b className="text-xs">Nhóm sinh viên</b><p className="mt-1 text-[10px] text-slate-500">Giá ưu đãi, giao tại điểm tập trung</p></div><div className="h-5 w-9 rounded-full bg-[#176b52] p-0.5"><div className="ml-auto h-4 w-4 rounded-full bg-white" /></div></div></div><div className="mt-5 flex justify-end"><Button onClick={() => notify('Đã lưu cài đặt')}>Lưu thay đổi</Button></div></div></div>;
-}
+            {/* Notifications */}
+            <Link
+              href="/notifications"
+              className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#57695f] hover:bg-slate-50"
+            >
+              <FontAwesomeIcon icon={faBell} className="text-sm" />
+              {notifications.some(item => !item.is_read) && <i className="absolute right-2 top-2 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />}
+            </Link>
 
-function SettingsView({ notify, apiState, basePath = '' }: { notify: (s: string) => void; apiState: string; basePath?: string; }) {
-  const tabs = ['Thông tin cửa hàng', 'Nhóm khách hàng', 'Chính sách giá', 'Giao hàng', 'Thông báo', 'Bảo mật'];
-  const [active, setActive] = useState(tabs[0]);
-  const [store, setStore] = usePersistentState('freshflow-store-settings', { name: 'FreshFlow Market', email: 'hello@freshflow.vn', phone: '090 123 4567', address: 'Thủ Đức, TP. Hồ Chí Minh' });
-  const [flags, setFlags] = usePersistentState('freshflow-notification-preferences', { student: true, worker: true, inventoryAlerts: true, orderUpdates: true });
-  const [busy, setBusy] = useState(false);
-  const save = async () => { if (apiState === 'live') { setBusy(true); try { throw new Error('API chua ho tro luu cau hinh cua hang.'); } catch (error) { notify(error instanceof Error ? error.message : 'Không lưu được cấu hình'); setBusy(false); return; } setBusy(false); } notify(apiState === 'live' ? 'Đã lưu cấu hình cửa hàng.' : 'Cấu hình đã được lưu trên trình duyệt bản demo.'); };
-  return <div className="grid gap-5 xl:grid-cols-[210px_1fr]"><nav className="panel h-fit p-2">{tabs.map(tab => <button onClick={() => setActive(tab)} key={tab} className={`block w-full rounded-lg px-3 py-2.5 text-left text-xs ${active === tab ? 'bg-white font-bold text-[#176b52]' : 'text-slate-500'}`}>{tab}</button>)}</nav><div className="panel p-6"><h2 className="font-bold">{active}</h2><p className="mt-1 text-xs text-slate-400">Cấu hình các tham số vận hành của FreshFlow.</p>{active === 'Thông tin cửa hàng' && <div className="mt-6 grid gap-4 sm:grid-cols-2">{([['name', 'Tên cửa hàng'], ['email', 'Email hỗ trợ'], ['phone', 'Số điện thoại'], ['address', 'Địa chỉ kho']] as const).map(([key, label]) => <label key={key} className="text-xs font-semibold text-slate-600">{label}<input value={store[key]} onChange={e => setStore({ ...store, [key]: e.target.value })} className="mt-2 w-full rounded-xl border border-[#e4e9e4] px-3 py-3 text-xs font-normal outline-none focus:border-[#8ab59a]" /></label>)}</div>}{active === 'Nhóm khách hàng' && <div className="mt-5 space-y-3">{[['student', 'Sinh viên', 'Chính sách ưu đãi và điểm giao tập trung'], ['worker', 'Người đi làm', 'Giá và phí giao theo cấu hình']].map(([key, label, description]) => <label key={key} className="flex items-center justify-between rounded-xl border p-4"><span><b className="text-xs">{label}</b><span className="mt-1 block text-[10px] text-slate-500">{description}</span></span><input type="checkbox" checked={flags[key as keyof typeof flags] as boolean} onChange={e => setFlags({ ...flags, [key]: e.target.checked })} /></label>)}</div>}{active === 'Chính sách giá' && <div className="mt-5 rounded-xl bg-white p-4 text-xs leading-relaxed text-slate-600">Thiết lập giá theo từng mặt hàng, nhóm khách hàng và phí giao hàng tại <Link href={`${basePath}/pricing`} className="font-bold text-[#176b52]">Giá & nhóm khách hàng</Link>. Backend phải tính lại tổng tiền khi tạo đơn.</div>}{active === 'Giao hàng' && <div className="mt-5 space-y-3">{[['Điểm giao tập trung', 'Điểm giao Ký túc xá khu A · Khung 11:30–12:00'], ['Giao riêng', 'Chỉ áp dụng khi khách có địa chỉ hợp lệ']].map(x => <div key={x[0]} className="rounded-xl border p-4"><b className="text-xs">{x[0]}</b><p className="mt-1 text-[10px] text-slate-500">{x[1]}</p><button className="mt-2 text-[10px] font-bold text-[#176b52]" onClick={() => notify('Sửa lịch giao cần cấu hình backend.')}>Chỉnh lịch</button></div>)}</div>}{active === 'Thông báo' && <div className="mt-5 space-y-3">{[['inventoryAlerts', 'Cảnh báo tồn kho'], ['orderUpdates', 'Cập nhật trạng thái đơn']].map(([key, label]) => <label key={key} className="flex items-center justify-between rounded-xl border p-4"><span className="text-xs font-semibold">{label}</span><input type="checkbox" checked={flags[key as keyof typeof flags] as boolean} onChange={e => setFlags({ ...flags, [key]: e.target.checked })} /></label>)}</div>}{active === 'Bảo mật' && <div className="mt-5 rounded-xl bg-white p-4 text-xs leading-relaxed text-slate-600">Phiên đăng nhập, giới hạn OTP, rate limit, Origin WebSocket, CSRF và thu hồi token phải được cấu hình và kiểm tra tại backend. <Link href={`${basePath}/audit-logs`} className="font-bold text-[#176b52]">Mở nhật ký thao tác</Link></div>}<div className="mt-6 flex justify-end"><Button disabled={busy} onClick={save}>{busy ? 'Đang lưu…' : 'Lưu thay đổi'}</Button></div></div></div>;
-}
-function Notifications({ items, clear, notify }: { items: string[]; clear: () => void; notify: (s: string) => void; }) {
-  return <div className="panel overflow-hidden"><div className="flex items-center justify-between border-b p-5"><div><b className="text-sm">Tất cả thông báo</b><p className="mt-1 text-xs text-slate-400">Cập nhật theo thời gian thực</p></div><button onClick={() => { clear(); notify('Đã đánh dấu tất cả là đã đọc'); }} className="text-xs font-bold text-[#176b52]">Đánh dấu tất cả đã đọc</button></div>{(items.length ? items : ['Bạn đã cập nhật hết thông báo mới.']).map((x, i) => <div key={x} className="flex gap-4 border-b p-5"><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${i === 0 ? 'bg-white text-amber-600' : 'bg-white text-[#4d7b58]'}`}><FontAwesomeIcon icon={i === 1 ? faBoxesStacked : faBell} /></div><div className="flex-1"><b className="text-xs">{x}</b><div className="mt-1 text-[10px] text-slate-400">{i === 0 ? '2 phút trước' : 'Hôm nay'}</div></div>{i < items.length && <i className="mt-2 h-2 w-2 rounded-full bg-[#39825a]" />}</div>)}</div>;
-}
+            {/* Cart Button */}
+            {!admin && !shipper && (
+              <Link
+                href="/cart"
+                className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#57695f] hover:bg-slate-50"
+              >
+                <FontAwesomeIcon icon={faShoppingCart} />
+                {cartCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#176b52] text-[9px] font-bold text-white">
+                    {cartCount}
+                  </span>
+                )}
+              </Link>
+            )}
 
-function NotificationsPanel({ admin, items, clear, publish }: { admin: boolean; items: string[]; clear: () => void; publish: (title: string, body: string, audience: string) => void; }) {
-  const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
-  const [audience, setAudience] = useState('all');
-  return <div className="grid gap-5 xl:grid-cols-[1fr_360px]"><div className="panel overflow-hidden"><div className="flex items-center justify-between border-b p-5"><div><b className="text-sm">{admin ? 'Thông báo trong hệ thống' : 'Tất cả thông báo'}</b><p className="mt-1 text-xs text-slate-400">Cập nhật từ đơn hàng và cửa hàng.</p></div><button onClick={clear} className="text-xs font-bold text-[#176b52]">Đánh dấu đã đọc</button></div>{(items.length ? items : ['Bạn đã cập nhật hết thông báo mới.']).map((item, i) => <div key={`${item}-${i}`} className="flex gap-4 border-b p-5"><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${i === 0 ? 'bg-white text-amber-600' : 'bg-white text-[#4d7b58]'}`}><FontAwesomeIcon icon={i === 1 ? faBoxesStacked : faBell} /></div><div className="flex-1"><b className="text-xs">{item}</b><div className="mt-1 text-[10px] text-slate-400">{i === 0 ? 'Gần đây' : 'Hôm nay'}</div></div>{i < items.length && <i className="mt-2 h-2 w-2 rounded-full bg-[#39825a]" />}</div>)}</div>{admin && <div className="panel h-fit p-5"><h3 className="font-bold">Gửi thông báo</h3><p className="mt-1 text-xs text-slate-500">Gửi cập nhật đến nhóm người dùng phù hợp.</p><label className="mt-4 block text-xs font-semibold">Đối tượng<select value={audience} onChange={e => setAudience(e.target.value)} className="mt-2 w-full rounded-xl border p-3 text-xs"><option value="all">Tất cả khách hàng</option><option value="students">Nhóm sinh viên</option><option value="workers">Nhóm người đi làm</option></select></label><label className="mt-4 block text-xs font-semibold">Tiêu đề<input value={title} onChange={e => setTitle(e.target.value)} maxLength={100} className="mt-2 w-full rounded-xl border p-3 text-xs" placeholder="Cập nhật từ FreshFlow" /></label><label className="mt-4 block text-xs font-semibold">Nội dung<textarea value={body} onChange={e => setBody(e.target.value)} maxLength={500} className="mt-2 h-24 w-full rounded-xl border p-3 text-xs" placeholder="Nội dung thông báo..." /></label><button disabled={!title.trim() || !body.trim()} onClick={() => { publish(title.trim(), body.trim(), audience); setTitle(''); setBody(''); }} className="mt-4 w-full rounded-xl bg-[#176b52] py-2.5 text-xs font-bold text-white disabled:opacity-40">Gửi thông báo</button><p className="mt-3 text-[10px] leading-relaxed text-slate-400">Backend cần kiểm tra quyền quản trị và ghi nhận người nhận trước khi xác nhận gửi.</p></div>}</div>;
-}
-function Profile({ notify }: { notify: (s: string) => void; }) {
-  return <div className="grid gap-5 xl:grid-cols-[1fr_350px]"><div className="panel p-6"><div className="flex items-center gap-4 border-b pb-5"><div className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-xl font-extrabold text-[#467253]">NA</div><div><h2 className="font-bold">Ngọc Anh</h2><div className="mt-1 text-xs text-slate-500">Sinh viên · Đã xác minh số điện thoại ✓</div><button className="mt-2 text-[10px] font-bold text-[#176b52]">Thay ảnh đại diện</button></div></div><div className="mt-5 grid gap-4 sm:grid-cols-2">{[['Họ và tên', 'Nguyễn Ngọc Anh'], ['Email', 'ngocanh@email.com'], ['Số điện thoại', '090 123 4567'], ['Nhóm khách hàng', 'Sinh viên']].map(x => <label key={x[0]} className="text-xs font-semibold text-slate-500">{x[0]}<input defaultValue={x[1]} className="mt-2 w-full rounded-xl border p-3 text-xs text-[#24342b] outline-none" /></label>)}</div><div className="mt-5 flex justify-end"><Button onClick={() => notify('Đã cập nhật hồ sơ')}>Lưu hồ sơ</Button></div></div><div className="panel p-5"><div className="flex items-center justify-between"><h3 className="font-bold">Địa chỉ giao hàng</h3><Badge tone="green">2 / 3</Badge></div>{[['', 'Ký túc xá khu A', 'Phòng 302, Đại học Quốc gia, Thủ Đức', 'Mặc định'], ['', 'Thư viện trung tâm', 'Đường Hàn Thuyên, Thủ Đức', '']].map(x => <div key={x[1]} className="mt-4 rounded-xl border p-4"><div className="flex justify-between"><b className="text-xs">{x[0]} {x[1]}</b><button className="text-slate-400"><FontAwesomeIcon icon={faEllipsis} /></button></div><p className="mt-2 text-[10px] leading-relaxed text-slate-500">{x[2]}</p>{x[3] && <span className="mt-2 inline-block text-[9px] font-bold text-[#176b52]">{x[3]}</span>}</div>)}<button onClick={() => notify('Đã mở biểu mẫu thêm địa chỉ')} className="mt-4 w-full rounded-xl border border-dashed py-3 text-xs font-bold text-[#176b52]"><FontAwesomeIcon icon={faPlus} className="mr-2" />Thêm địa chỉ</button><p className="mt-2 text-center text-[9px] text-slate-400">Bạn có thể lưu tối đa 3 địa chỉ.</p></div></div>;
-}
+            {/* Profile pill */}
+            <button
+              onClick={() => router.push('/profile')}
+              className="flex items-center gap-2.5 border-l border-[#e4e9e4] pl-3"
+            >
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#e8f5ec] text-xs font-extrabold text-[#176b52]">
+                {currentUser?.full_name ? currentUser.full_name.slice(0, 2).toUpperCase() : 'FF'}
+              </div>
+              <div className="hidden text-left sm:block">
+                <div className="text-xs font-bold text-[#1f2d25]">{currentUser?.full_name || 'Khách hàng'}</div>
+                <div className="text-[10px] text-[#8c9890]">{currentUser?.customer_group || 'Nhóm sinh viên'}</div>
+              </div>
+            </button>
+          </div>
+        </header>
 
-function ProfileView({ notify }: { notify: (s: string) => void; }) {
-  type Address = { id: number; label: string; detail: string; isDefault: boolean; };
-  const [addresses, setAddresses] = usePersistentState<Address[]>('freshflow-addresses', [{ id: 1, label: 'Ký túc xá khu A', detail: 'Phòng 302, Đại học Quốc gia, Thủ Đức, TP. Hồ Chí Minh', isDefault: true }, { id: 2, label: 'Thư viện trung tâm', detail: 'Đường Hàn Thuyên, Thủ Đức, TP. Hồ Chí Minh', isDefault: false }]);
-  const [adding, setAdding] = useState(false);
-  const [label, setLabel] = useState('');
-  const [detail, setDetail] = useState('');
-  const [city, setCity] = useState('');
-  const [name, setName] = useState('Nguyễn Ngọc Anh');
-  const [email, setEmail] = useState('ngocanh@email.com');
-  const [phone, setPhone] = useState('090 123 4567');
-  const addAddress = () => { if (addresses.length >= 3) { notify('Mỗi tài khoản chỉ được lưu tối đa 3 địa chỉ.'); return; } if (!label.trim() || !detail.trim()) { notify('Nhập tên địa chỉ và địa chỉ đầy đủ.'); return; } setAddresses(current => [...current, { id: Date.now(), label: label.trim(), detail: detail.trim(), isDefault: current.length === 0 }]); setLabel(''); setDetail(''); setAdding(false); notify('Đã lưu địa chỉ trong bản demo.'); };
-  return <div className="grid gap-5 xl:grid-cols-[1fr_350px]"><div className="panel p-6"><div className="flex items-center gap-4 border-b pb-5"><div className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-xl font-extrabold text-[#467253]">NA</div><div><h2 className="font-bold">{name || 'Hồ sơ của bạn'}</h2><div className="mt-1 text-xs text-slate-500">Sinh viên · Đã xác minh số điện thoại</div></div></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-xs font-semibold text-slate-500">Họ và tên<input value={name} onChange={e => setName(e.target.value)} className="mt-2 w-full rounded-xl border p-3 text-xs text-[#24342b] outline-none" /></label><label className="text-xs font-semibold text-slate-500">Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} className="mt-2 w-full rounded-xl border p-3 text-xs text-[#24342b] outline-none" /></label><label className="text-xs font-semibold text-slate-500">Số điện thoại<input value={phone} onChange={e => setPhone(e.target.value)} className="mt-2 w-full rounded-xl border p-3 text-xs text-[#24342b] outline-none" /></label><label className="text-xs font-semibold text-slate-500">Nhóm khách hàng<select defaultValue="Sinh viên" className="mt-2 w-full rounded-xl border p-3 text-xs text-[#24342b] outline-none"><option>Sinh viên</option><option>Người đi làm</option></select></label></div><div className="mt-5 flex justify-end"><Button onClick={() => notify('Hồ sơ đã được cập nhật trong phiên demo.')}>Lưu hồ sơ</Button></div></div><div className="panel p-5"><div className="flex items-center justify-between"><h3 className="font-bold">Địa chỉ giao hàng</h3><Badge tone={addresses.length === 3 ? 'orange' : 'green'}>{addresses.length} / 3</Badge></div>{addresses.map(address => <div key={address.id} className="mt-4 rounded-xl border p-4"><div className="flex items-start justify-between gap-2"><div><b className="text-xs">{address.label}</b>{address.isDefault && <span className="ml-2 text-[9px] font-bold text-[#176b52]">MẶC ĐỊNH</span>}</div><button aria-label="Xóa địa chỉ" onClick={() => { setAddresses(current => { const next = current.filter(a => a.id !== address.id); if (address.isDefault && next.length) next[0] = { ...next[0], isDefault: true }; return next; }); notify('Đã xóa địa chỉ trong bản demo.'); }} className="text-xs text-slate-400 hover:text-rose-600">Xóa</button></div><p className="mt-2 text-[10px] leading-relaxed text-slate-500">{address.detail}</p>{!address.isDefault && <button onClick={() => setAddresses(current => current.map(a => ({ ...a, isDefault: a.id === address.id })))} className="mt-2 text-[10px] font-bold text-[#176b52]">Đặt làm mặc định</button>}</div>)}{adding && <div className="mt-4 space-y-2 rounded-xl bg-white p-3"><input value={label} onChange={e => setLabel(e.target.value)} placeholder="Tên địa chỉ" className="w-full rounded-lg border px-3 py-2 text-xs" /><input value={city} onChange={e => setCity(e.target.value)} placeholder="Tinh/thanh pho" className="w-full rounded-lg border px-3 py-2 text-xs" /><textarea value={detail} onChange={e => setDetail(e.target.value)} placeholder="Số nhà, đường, phường/xã, quận/huyện..." className="w-full rounded-lg border px-3 py-2 text-xs" /><div className="flex justify-end gap-2"><button onClick={() => setAdding(false)} className="px-2 text-xs text-slate-500">Hủy</button><button onClick={addAddress} className="rounded-lg bg-[#176b52] px-3 py-2 text-xs font-bold text-white">Lưu địa chỉ</button></div></div>}{addresses.length < 3 && <button onClick={() => setAdding(!adding)} className="mt-4 w-full rounded-xl border border-dashed py-3 text-xs font-bold text-[#176b52]"><FontAwesomeIcon icon={faPlus} className="mr-2" />Thêm địa chỉ</button>}<p className="mt-2 text-center text-[9px] text-slate-400">Tối đa ba địa chỉ giao hàng cho mỗi tài khoản.</p></div></div>;
-}
+        {/* Content Body */}
+        <div className="mx-auto max-w-[1440px] px-8 py-7">
+          {/* Breadcrumb Title bar */}
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <div className="mb-1 text-[11px] font-semibold text-[#83a18c]">
+                {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'full', timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())}
+              </div>
+              <h1 className="text-[24px] font-extrabold tracking-tight text-[#1e2e26]">
+                {page === 'dashboard'
+                  ? admin
+                    ? `Bảng điều khiển Quản Trị Viên`
+                    : shop
+                      ? `Kênh Cửa Hàng (Shop)`
+                      : shipper
+                        ? `Trung tâm Giao Hàng (Shipper)`
+                        : 'Nông sản tươi ngon hôm nay'
+                  : title}
+              </h1>
+            </div>
 
-function CheckoutView({ money, total, notify, done }: { money: (n: number) => string; total: number; notify: (s: string) => void; done: (details: { delivery: string; addressId: number; note: string; }) => void; }) {
-  type Address = { id: number; label: string; detail: string; isDefault: boolean; };
-  const [addresses] = usePersistentState<Address[]>('freshflow-addresses', [{ id: 1, label: 'Ký túc xá khu A', detail: 'Phòng 302, Đại học Quốc gia, Thủ Đức, TP. Hồ Chí Minh', isDefault: true }]);
-  const [selected, setSelected] = useState<number | undefined>(addresses.find(a => a.isDefault)?.id || addresses[0]?.id);
-  const [delivery, setDelivery] = useState('Điểm giao tập trung');
-  const [note, setNote] = useState('');
-  const fee = delivery === 'Điểm giao tập trung' ? 0 : 20000;
-  return <div className="grid gap-5 xl:grid-cols-[1fr_350px]"><div className="space-y-5"><div className="panel p-5"><div className="flex items-center justify-between"><h3 className="font-bold">Địa chỉ nhận hàng</h3><Link href="/profile" className="text-xs font-bold text-[#176b52]">Quản lý địa chỉ</Link></div>{addresses.length ? addresses.map(address => <label key={address.id} className={`mt-3 flex cursor-pointer gap-3 rounded-xl border-2 p-4 ${selected === address.id ? 'border-[#7eaf8a] bg-white' : 'border-[#edf0ed]'}`}><input type="radio" checked={selected === address.id} onChange={() => setSelected(address.id)} /><span><b className="text-xs">{address.label} {address.isDefault && <Badge tone="green">Mặc định</Badge>}</b><span className="mt-2 block text-xs text-slate-500">{address.detail}</span></span></label>) : <div className="mt-4 rounded-xl bg-white p-4 text-xs text-amber-800">Bạn cần thêm địa chỉ trước khi đặt giao riêng. <Link href="/profile" className="font-bold underline">Thêm địa chỉ</Link></div>}</div><div className="panel p-5"><h3 className="font-bold">Phương thức giao hàng</h3><div className="mt-4 space-y-3">{[['Điểm giao tập trung', 'Nhận tại Ký túc xá khu A · 11:30–12:00', 'Miễn phí'], ['Giao riêng', 'Giao đến địa chỉ của bạn · 2–4 giờ', money(20000)]].map(x => <button onClick={() => setDelivery(x[0])} key={x[0]} className={`flex w-full items-start gap-3 rounded-xl border p-4 text-left ${delivery === x[0] ? 'border-[#70a77b] bg-white' : 'border-[#e8ece8]'}`}><span className={`mt-0.5 h-4 w-4 rounded-full border ${delivery === x[0] ? 'border-[5px] border-[#176b52]' : 'border-slate-300'}`} /><span className="flex-1"><b className="text-xs">{x[0]}</b><span className="mt-1 block text-[10px] text-slate-500">{x[1]}</span></span><b className="text-[10px] text-[#176b52]">{x[2]}</b></button>)}</div></div><div className="panel p-5"><h3 className="font-bold">Ghi chú cho cửa hàng</h3><textarea value={note} onChange={e => setNote(e.target.value)} maxLength={300} placeholder="Ví dụ: vui lòng chọn trái cây chín vừa..." className="mt-3 h-20 w-full resize-none rounded-xl border p-3 text-xs outline-none focus:border-[#8cb59a]" /><div className="mt-1 text-right text-[10px] text-slate-400">{note.length}/300</div></div></div><div className="panel h-fit p-5"><h3 className="font-bold">Xác nhận đơn hàng</h3><div className="mt-4 flex justify-between text-xs text-slate-500"><span>Tạm tính</span><span>{money(total)}</span></div><div className="mt-3 flex justify-between text-xs text-slate-500"><span>Giao hàng</span><span>{fee ? money(fee) : 'Miễn phí'}</span></div><div className="my-4 border-t" /><div className="flex justify-between font-bold"><span>Tổng cộng</span><span className="text-[#176b52]">{money(total + fee)}</span></div><div className="mt-4 rounded-xl bg-white p-3 text-[10px] leading-relaxed text-slate-500">Đơn hàng ở trạng thái <b>Chờ duyệt</b>. Backend sẽ kiểm tra lại giá và tồn kho trước khi xác nhận.</div><Button disabled={!selected && delivery === 'Giao riêng'} className="mt-4 w-full disabled:opacity-50" onClick={() => { if (!selected && delivery === 'Giao riêng') { notify('Hãy thêm địa chỉ giao hàng trong hồ sơ trước.'); return; } done({ delivery, addressId: selected || 0, note }); }}>Gửi đơn hàng <FontAwesomeIcon icon={faArrowRight} /></Button><div className="mt-3 text-center text-[10px] text-slate-400">Không thu tiền trực tuyến trong bước này.</div></div></div>;
-}
-function Checkout({ money, total, notify, done }: { money: (n: number) => string; total: number; notify: (s: string) => void; done: () => void; }) {
-  const [delivery, setDelivery] = useState('Điểm giao tập trung');
-  return <div className="grid gap-5 xl:grid-cols-[1fr_350px]"><div className="space-y-5"><div className="panel p-5"><h3 className="font-bold">Địa chỉ nhận hàng</h3><div className="mt-4 rounded-xl border-2 border-[#7eaf8a] bg-white p-4"><div className="flex gap-3"><input type="radio" checked readOnly /><div><b className="text-xs">Ký túc xá khu A <Badge tone="green">Mặc định</Badge></b><p className="mt-2 text-xs text-slate-500">Phòng 302, Đại học Quốc gia, Thủ Đức, TP. Hồ Chí Minh</p></div><button className="ml-auto text-xs font-bold text-[#176b52]">Thay đổi</button></div></div></div><div className="panel p-5"><h3 className="font-bold">Phương thức giao hàng</h3><div className="mt-4 space-y-3">{[['Điểm giao tập trung', 'Nhận tại Ký túc xá khu A · 11:30–12:00', 'Miễn phí'], ['Giao riêng', 'Giao đến địa chỉ của bạn · 2–4 giờ', 'Từ 20.000₫']].map(x => <button onClick={() => setDelivery(x[0])} key={x[0]} className={`flex w-full items-start gap-3 rounded-xl border p-4 text-left ${delivery === x[0] ? 'border-[#70a77b] bg-white' : 'border-[#e8ece8]'}`}><span className={`mt-0.5 h-4 w-4 rounded-full border ${delivery === x[0] ? 'border-[5px] border-[#176b52]' : 'border-slate-300'}`} /><div className="flex-1"><b className="text-xs">{x[0]}</b><p className="mt-1 text-[10px] text-slate-500">{x[1]}</p></div><b className="text-[10px] text-[#176b52]">{x[2]}</b></button>)}</div></div><div className="panel p-5"><h3 className="font-bold">Ghi chú cho cửa hàng</h3><textarea placeholder="Ví dụ: vui lòng chọn trái cây chín vừa..." className="mt-3 h-20 w-full resize-none rounded-xl border p-3 text-xs outline-none focus:border-[#8cb59a]" /></div></div><div className="panel h-fit p-5"><h3 className="font-bold">Xác nhận đơn hàng</h3><div className="mt-4 flex justify-between text-xs text-slate-500"><span>Tạm tính</span><span>{money(total)}</span></div><div className="mt-3 flex justify-between text-xs text-slate-500"><span>Giao hàng</span><span>{delivery === 'Điểm giao tập trung' ? 'Miễn phí' : '20.000₫'}</span></div><div className="my-4 border-t" /><div className="flex justify-between font-bold"><span>Tổng cộng</span><span className="text-[#176b52]">{money(total + (delivery === 'Giao riêng' ? 20000 : 0))}</span></div><div className="mt-4 rounded-xl bg-white p-3 text-[10px] leading-relaxed text-slate-500">Đơn hàng sẽ ở trạng thái <b>Chờ duyệt</b>. Số lượng khả dụng sẽ được xác nhận sau khi cửa hàng duyệt đơn.</div><Button className="mt-4 w-full" onClick={done}>Gửi đơn hàng <FontAwesomeIcon icon={faArrowRight} /></Button><button onClick={() => notify('Thanh toán trực tuyến sẽ khả dụng sau khi tích hợp backend.')} className="mt-3 w-full text-[10px] text-slate-400">Chưa yêu cầu thanh toán trực tuyến</button></div></div>;
-}
-function AuthPage({ page, navigate, notify }: { page: string; navigate: (s: string) => void; notify: (s: string) => void; }) {
-  const title = page === 'login' ? 'Chào mừng trở lại' : page === 'register' ? 'Tạo tài khoản FreshFlow' : page === 'verify' ? 'Xác minh số điện thoại' : 'Khôi phục mật khẩu';
-  return <div className="grid min-h-screen bg-white lg:grid-cols-2"><div className="relative hidden overflow-hidden bg-white p-12 lg:flex lg:flex-col lg:justify-between"><Link href="/dashboard" className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#176b52] text-white"><FontAwesomeIcon icon={faSeedling} /></div><b className="text-xl">freshflow.</b></Link><div className="relative z-10 max-w-md"><Badge tone="green">TƯƠI MỖI NGÀY</Badge><h1 className="mt-5 text-5xl font-extrabold leading-tight text-[#254833]">Thực phẩm tươi.<br />Cuộc sống xanh.</h1><p className="mt-4 leading-relaxed text-[#67816c]">Kết nối nông sản chất lượng với cộng đồng. Đặt hàng dễ dàng, nhận hàng tươi ngon mỗi ngày.</p><div className="mt-8 flex -space-x-2">{['MA', 'TN', 'LH', 'PQ'].map(x => <div key={x} className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#eaf3eb] bg-white text-[9px] font-bold text-[#4a7658]">{x}</div>)}<div className="flex h-9 items-center rounded-full border-2 border-[#eaf3eb] bg-white px-3 text-[9px] font-bold text-[#477354]">+1.2k khách hàng</div></div></div><div className="text-xs text-[#829487]"> 2024 FreshFlow · Nông sản tươi, mỗi ngày</div></div><div className="flex items-center justify-center px-6 py-12"><div className="w-full max-w-[410px]"><Link href="/dashboard" className="mb-10 flex items-center gap-3 lg:hidden"><div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#176b52] text-white"><FontAwesomeIcon icon={faSeedling} /></div><b className="text-xl">freshflow.</b></Link><div className="text-[11px] font-bold uppercase tracking-[.14em] text-[#80a189]">{page === 'register' ? 'BẮT ĐẦU MIỄN PHÍ' : 'XIN CHÀO BẠN'}</div><h2 className="mt-2 text-3xl font-extrabold">{title}</h2><p className="mt-2 text-sm text-slate-500">{page === 'login' ? 'Đăng nhập để tiếp tục đến cửa hàng tươi ngon của bạn.' : 'Điền thông tin bên dưới để tiếp tục.'}</p><div className="mt-7 space-y-4">{page === 'register' && <label className="block text-xs font-semibold">Họ và tên<input placeholder="Nguyễn Ngọc Anh" className="mt-2 w-full rounded-xl border border-[#e4e9e4] px-4 py-3.5 text-sm outline-none focus:border-[#8bb59a]" /></label>}<label className="block text-xs font-semibold">{page === 'login' ? 'Email hoặc số điện thoại' : 'Số điện thoại'}<input placeholder={page === 'login' ? 'email@example.com hoặc 090...' : '090 123 4567'} className="mt-2 w-full rounded-xl border border-[#e4e9e4] px-4 py-3.5 text-sm outline-none focus:border-[#8bb59a]" /></label>{page !== 'verify' && page !== 'forgot' && <label className="block text-xs font-semibold">Mật khẩu<input type="password" placeholder="Tối thiểu 8 ký tự" className="mt-2 w-full rounded-xl border border-[#e4e9e4] px-4 py-3.5 text-sm outline-none focus:border-[#8bb59a]" /></label>}{page === 'register' && <label className="block text-xs font-semibold">Nhóm khách hàng<select className="mt-2 w-full rounded-xl border border-[#e4e9e4] px-4 py-3.5 text-sm"><option>Sinh viên</option><option>Người đi làm</option></select></label>}{page === 'login' && <div className="flex items-center justify-between text-xs"><label className="flex items-center gap-2 text-slate-500"><input type="checkbox" /> Ghi nhớ đăng nhập</label><Link href="/forgot" className="font-semibold text-[#176b52]">Quên mật khẩu?</Link></div>}<Button className="w-full !py-3.5" onClick={() => page === 'register' ? navigate('/verify') : page === 'verify' ? notify('Mã OTP gồm 6 chữ số đã được gửi (bản demo).') : page === 'forgot' ? notify('Hướng dẫn khôi phục đã được gửi (bản demo).') : navigate('/dashboard')}>{page === 'login' ? 'Đăng nhập' : page === 'register' ? 'Tạo tài khoản' : page === 'verify' ? 'Xác nhận OTP' : 'Gửi hướng dẫn'} <FontAwesomeIcon icon={faArrowRight} /></Button>{page === 'verify' && <div className="flex gap-2">{Array.from({ length: 6 }).map((_, i) => <input key={i} maxLength={1} className="h-12 w-full rounded-xl border text-center text-lg font-bold outline-none focus:border-[#176b52]" />)}</div>}</div><div className="my-6 flex items-center gap-3 text-[10px] text-slate-400"><span className="h-px flex-1 bg-white" />HOẶC TIẾP TỤC VỚI<span className="h-px flex-1 bg-white" /></div><button className="w-full rounded-xl border py-3 text-xs font-bold text-slate-600" onClick={() => navigate('/dashboard')}>Tiếp tục với Google</button><p className="mt-6 text-center text-xs text-slate-500">{page === 'login' ? 'Chưa có tài khoản?' : 'Đã có tài khoản?'} <Link className="font-bold text-[#176b52]" href={page === 'login' ? '/register' : '/login'}>{page === 'login' ? 'Đăng ký ngay' : 'Đăng nhập'}</Link></p><div className="mt-8 flex justify-center gap-5 text-[10px] text-slate-400"><button>Điều khoản</button><button>Quyền riêng tư</button><button>Trợ giúp</button></div></div></div></div>;
-}
-function Modal({ type, close, submit }: { type: string; close: () => void; submit: (values: Record<string, string>) => void; }) {
-  const product = type === 'product';
-  const [imageBusy, setImageBusy] = useState(false);
-  const [values, setValues] = useState<Record<string, string>>({});
-  const fields = product ? ['Tên sản phẩm', 'Danh mục', 'Đơn vị tính', 'Giá bán (₫)', 'Số lượng ban đầu'] : ['Tên mặt hàng', 'Danh mục mong muốn', 'Số lượng cần', 'Ghi chú'];
-  const valid = product ? Boolean(values['Tên sản phẩm']?.trim() && values['Danh mục'] && values['Đơn vị tính']?.trim() && Number(values['Giá bán (₫)']) > 0 && values['Số lượng ban đầu'] !== undefined && Number(values['Số lượng ban đầu']) >= 0) : Boolean(values['Tên mặt hàng']?.trim() && values['Danh mục mong muốn'] && values['Số lượng cần']?.trim());
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#10251bb8] p-4"><div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-center justify-between"><h2 className="text-lg font-extrabold">{product ? 'Thêm sản phẩm mới' : 'Tạo yêu cầu mặt hàng'}</h2><button onClick={close} className="text-slate-400"><FontAwesomeIcon icon={faXmark} /></button></div><p className="mt-1 text-xs text-slate-500">{product ? 'Thông tin sản phẩm sẽ hiển thị trong cửa hàng.' : 'Cho cửa hàng biết mặt hàng bạn đang tìm.'}</p><div className="mt-5 space-y-4">{fields.map((x, i) => <label key={x} className="block text-xs font-semibold">{x}{(x === 'Danh mục' || x === 'Danh mục mong muốn') ? <select value={values[x] || ''} onChange={e => setValues({ ...values, [x]: e.target.value })} className="mt-2 w-full rounded-xl border px-3 py-3 text-xs"><option value="">Chọn danh mục</option><option>Trái cây</option><option>Rau củ</option><option>Thực phẩm</option></select> : <input type={x === 'Giá bán (₫)' || x === 'Số lượng ban đầu' ? 'number' : 'text'} min={x === 'Giá bán (₫)' || x === 'Số lượng ban đầu' ? '0' : undefined} value={values[x] || ''} onChange={e => setValues({ ...values, [x]: e.target.value })} placeholder={product ? ['Ví dụ: Cam sành miền Tây', '', 'kg', '45000', '50'][i] : ['Ví dụ: Táo xanh Granny Smith', '', '5 kg', 'Tùy chọn'][i]} className="mt-2 w-full rounded-xl border px-3 py-3 text-xs outline-none focus:border-[#8bb59a]" />}</label>)}{product && <ProductImageField value={values.image || ''} onChange={image => setValues(current => ({ ...current, image }))} onBusyChange={setImageBusy} />}</div><div className="mt-6 flex justify-end gap-2"><Button kind="secondary" onClick={close}>Hủy</Button><Button disabled={!valid || imageBusy} onClick={() => submit(values)}>{product ? 'Thêm sản phẩm' : 'Gửi yêu cầu'}</Button></div></div></div>;
+            <div className="flex gap-2">
+              {page === 'dashboard' && !admin && !shop && !shipper && (
+                <Link href="/requests">
+                  <Button kind="secondary"><FontAwesomeIcon icon={faPlus} /> Yêu cầu mặt hàng</Button>
+                </Link>
+              )}
+              {page === 'products' && (admin || shop) && (
+                <Button onClick={() => { setEditingProduct(null); setProductEditorOpen(true); }}><FontAwesomeIcon icon={faPlus} /> Thêm sản phẩm</Button>
+              )}
+            </div>
+          </div>
+
+          {/* PAGE ROUTING DISPATCH */}
+
+          {/* NEWFEED */}
+          {(page === 'newfeed' || (!admin && !shop && !shipper && page === 'dashboard')) && (
+            <Newfeed
+              posts={posts}
+              products={products}
+              currentUser={currentUser}
+              onAddToCart={addCart}
+              onCreatePost={handleCreatePost}
+              money={money}
+            />
+          )}
+
+          {/* ADMIN DASHBOARD */}
+          {page === 'dashboard' && admin && (
+            <AdminDashboardView
+              summary={financialSummary}
+              vatConfigs={vatConfigs}
+              vatHistory={vatHistory}
+              recentOrders={orders}
+              onUpdateVat={handleUpdateVat}
+              money={money}
+            />
+          )}
+
+          {/* SHOP PORTAL */}
+          {(page === 'shop' || (page === 'dashboard' && shop) || (shop && ['products', 'orders', 'reviews'].includes(page))) && (
+            <ShopPortalView
+              currentUser={currentUser || ({} as any)}
+              products={products}
+              orders={orders}
+              reviews={reviews}
+              shippers={shippers}
+              onAddProduct={() => { setEditingProduct(null); setProductEditorOpen(true); }}
+              onEditProduct={product => { setEditingProduct(product); setProductEditorOpen(true); }}
+              onAdjustInventory={adjustInventory}
+              initialTab={page === 'products' ? 'products' : page === 'orders' ? 'orders' : page === 'reviews' ? 'reviews' : 'overview'}
+              onUpdateOrderStatus={changeOrderStatus}
+              onAssignShipper={handleAssignShipper}
+              onReplyReview={handleReplyReview}
+              money={money}
+            />
+          )}
+
+          {/* SHIPPER PORTAL */}
+          {(page === 'shipper' || (page === 'dashboard' && shipper) || (shipper && page === 'history')) && (
+            <ShipperPortalView
+              currentUser={currentUser || ({} as any)}
+              assignedOrders={orders.filter(o => o.shipper_id === currentUser?.id)}
+              availableOrders={orders.filter(o => !o.shipper_id && (o.status === 'Chờ Shipper lấy hàng' || o.status === 'READY_FOR_PICKUP'))}
+              onClaimOrder={handleShipperClaim}
+              onPickupOrder={handleShipperPickup}
+              onDeliveringOrder={handleShipperDelivering}
+              onCompleteOrder={handleShipperComplete}
+              initialTab={page === 'history' ? 'history' : 'assigned'}
+              money={money}
+            />
+          )}
+
+          {/* PRODUCTS CATALOG */}
+          {page === 'products' && (!shop || admin) && (
+            <ProductsPanel
+              query={query}
+              setQuery={setQuery}
+              admin={admin}
+              products={filtered}
+              category={category}
+              setCategory={setCategory}
+              addCart={addCart}
+              money={money}
+              create={() => { setEditingProduct(null); setProductEditorOpen(true); }}
+              go={path => router.push(admin && isAdminRoute ? `/admin${path}` : path)}
+              save={saveProductInline}
+              remove={deleteProduct}
+            />
+          )}
+
+          {/* INVENTORY */}
+          {page === 'inventory' && <InventoryView products={products} money={money} adjust={adjustInventory} />}
+          {page === 'products' && admin && <InventoryView products={products} money={money} adjust={adjustInventory} />}
+
+          {/* ORDERS */}
+          {page === 'orders' && !shop && (
+            <div className="space-y-4">
+              <OrdersView
+                admin={admin}
+                orders={orders}
+                updateStatus={changeOrderStatus}
+                statusTone={statusTone}
+                money={money}
+                tab={activeTab}
+                setTab={setActiveTab}
+              />
+
+              {/* Review Buttons on completed orders for customers */}
+              {!admin && !shop && !shipper && reviewableCompletedOrder && (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-xs">
+                  <div className="font-bold text-emerald-900 mb-1 flex items-center gap-2">
+                    <FontAwesomeIcon icon={faStar} className="text-yellow-500" /> Đánh giá trải nghiệm đơn hàng
+                  </div>
+                  <p className="text-emerald-800 text-[11px] mb-3">
+                    Bạn có đơn hàng đã giao thành công. Hãy chia sẻ cảm nhận để cửa hàng nâng cao chất lượng nhé!
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleOpenReview(reviewableCompletedOrder.lines?.find(line => line.productId)?.productId || 0, reviewableCompletedOrder.lines?.find(line => line.productId)?.name || 'Nông sản', 'product')}
+                      className="rounded-xl bg-[#176b52] px-3.5 py-1.5 font-bold text-white shadow-sm hover:bg-[#125340]"
+                    >
+                      Đánh giá sản phẩm đã mua
+                    </button>
+                    {reviewableCompletedOrder.shipper_id && <button
+                      onClick={() => handleOpenReview(reviewableCompletedOrder.apiId || 0, 'Tài xế giao hàng', 'shipper')}
+                      className="rounded-xl bg-blue-600 px-3.5 py-1.5 font-bold text-white shadow-sm hover:bg-blue-700"
+                    >
+                      Đánh giá Shipper
+                    </button>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DELIVERIES */}
+          {page === 'deliveries' && <Deliveries orders={orders} money={money} change={changeOrderStatus} statusTone={statusTone} />}
+
+          {/* CUSTOMERS & GROUPS */}
+          {page === 'customers' && <CustomersView notify={notify} apiState={apiState} />}
+
+          {/* REQUESTS */}
+          {page === 'requests' && (
+            <RequestsView
+              admin={admin}
+              requests={requests}
+              notify={notify}
+              open={() => setModal('request')}
+              update={updateRequest}
+            />
+          )}
+
+          {/* REPORTS */}
+          {page === 'reports' && <ReportsPanel money={money} apiState={apiState} orders={orders} />}
+
+          {page === 'notifications' && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between"><h2 className="text-lg font-bold">Thông báo</h2><button onClick={() => void clearNotifications()} className="text-xs font-bold text-[#176b52]">Đánh dấu tất cả đã đọc</button></div>
+              {notifications.length === 0 && <div className="panel p-10 text-center text-sm text-slate-500">Bạn chưa có thông báo nào.</div>}
+              {notifications.map(item => <article key={item.id} className={`panel flex items-start gap-3 p-4 ${item.is_read ? 'opacity-70' : 'border-emerald-200 bg-emerald-50/40'}`}><span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-600" /><div className="flex-1"><h3 className="text-sm font-bold">{item.title}</h3><p className="mt-1 text-xs text-slate-600">{item.body}</p><time className="mt-2 block text-[10px] text-slate-400">{item.created_at ? new Date(item.created_at).toLocaleString('vi-VN') : item.event_type}</time></div>{!item.is_read && <button onClick={() => void markNotificationRead(item.id)} className="text-xs font-semibold text-[#176b52]">Đã đọc</button>}</article>)}
+            </section>
+          )}
+
+          {/* PROFILE & ADDRESSES */}
+          {page === 'profile' && <ApiProfile />}
+
+          {/* CART & CHECKOUT */}
+          {page === 'cart' && (
+            <Cart
+              products={products}
+              cart={cart}
+              setCart={setCart}
+              money={money}
+              go={path => router.push(admin && isAdminRoute ? `/admin${path}` : path)}
+            />
+          )}
+
+          {page === 'checkout' && (
+            <ApiCheckout money={money} total={cartTotal} cart={cart} done={placeOrder} />
+          )}
+
+          {/* PRODUCT DETAIL */}
+          {detailId && detailProduct && (
+            <ProductDetail
+              product={detailProduct}
+              addCart={addCart}
+              money={money}
+              go={path => router.push(admin && isAdminRoute ? `/admin${path}` : path)}
+            />
+          )}
+
+          {/* ORDER DETAIL */}
+          {orderDetailId && detailOrder && (
+            <OrderDetailView
+              order={detailOrder}
+              statusTone={statusTone}
+              money={money}
+              admin={admin && isAdminRoute}
+              updateStatus={changeOrderStatus}
+              go={path => router.push(admin && isAdminRoute ? `/admin${path}` : path)}
+            />
+          )}
+        </div>
+      </main>
+
+      {/* Floating Chat Modal */}
+      <ChatModal
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        currentUser={currentUser}
+        conversations={conversations}
+        activePeerId={activePeerId}
+        messages={chatMessages}
+        onSelectPeer={peerId => {
+          setActivePeerId(peerId);
+          openChatWith(peerId);
+        }}
+        onSendMessage={handleSendChatMessage}
+      />
+
+      {/* Review Modal */}
+      <ReviewModal
+        isOpen={reviewModalData.isOpen}
+        onClose={() => setReviewModalData(prev => ({ ...prev, isOpen: false }))}
+        type={reviewModalData.type}
+        targetId={reviewModalData.targetId}
+        targetTitle={reviewModalData.title}
+        onSubmit={handleSubmitReview}
+      />
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl bg-[#1e2f26] px-4 py-3 text-xs font-semibold text-white shadow-2xl backdrop-blur">
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white text-[10px]">
+            <FontAwesomeIcon icon={faCheck} />
+          </span>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
 }

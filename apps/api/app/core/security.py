@@ -59,5 +59,23 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != "ADMIN":
-        raise HTTPException(status_code=403, detail="Cần quyền quản trị viên")
+        raise HTTPException(status_code=403, detail="Cần quyền quản trị viên (Admin)")
+    return user
+
+
+def require_shop(user: User = Depends(get_current_user)) -> User:
+    if user.role not in {"SHOP", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="Cần quyền Cửa hàng (Shop)")
+    return user
+
+
+def require_shipper(user: User = Depends(get_current_user)) -> User:
+    if user.role not in {"SHIPPER", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="Cần quyền Giao hàng (Shipper)")
+    return user
+
+
+def require_admin_or_shop(user: User = Depends(get_current_user)) -> User:
+    if user.role not in {"ADMIN", "SHOP"}:
+        raise HTTPException(status_code=403, detail="Cần quyền Quản trị viên hoặc Cửa hàng")
     return user

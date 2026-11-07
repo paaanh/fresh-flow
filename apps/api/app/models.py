@@ -17,12 +17,28 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(120))
     password_hash: Mapped[str] = mapped_column(String(255))
-    role: Mapped[str] = mapped_column(String(20), default="CUSTOMER", index=True)
-    customer_group: Mapped[str] = mapped_column(String(30), default="STUDENT")
+    role: Mapped[str] = mapped_column(String(20), default="CUSTOMER", index=True)  # ADMIN, SHOP, CUSTOMER, SHIPPER
+    customer_group: Mapped[str] = mapped_column(String(30), default="STUDENT")    # STUDENT, WORKING, GROUP_A, GROUP_B, COLLECTIVE
     phone: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    shop_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    shop_description: Mapped[str] = mapped_column(Text, default="")
+    shop_address: Mapped[str] = mapped_column(String(255), default="")
+    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    vehicle_info: Mapped[str] = mapped_column(String(100), default="")  # Dành cho Shipper
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
     addresses: Mapped[list["Address"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class CustomerGroup(Base):
+    __tablename__ = "customer_groups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(Text, default="")
+    discount_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.00"))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Address(Base):
@@ -45,17 +61,23 @@ class Category(Base):
     __tablename__ = "categories"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    icon: Mapped[str] = mapped_column(String(100), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Product(Base):
     __tablename__ = "products"
     id: Mapped[int] = mapped_column(primary_key=True)
+    shop_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(180), index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     unit: Mapped[str] = mapped_column(String(30), default="phần")
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    images: Mapped[str] = mapped_column(Text, default="")  # JSON array hoặc link ảnh ngăn cách dấu phẩy
+    attached_services: Mapped[str] = mapped_column(Text, default="")  # Dịch vụ kèm theo
     base_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -95,17 +117,74 @@ class DeliverySlot(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class VatConfig(Base):
+    __tablename__ = "vat_configs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tax_name: Mapped[str] = mapped_column(String(100), default="VAT")
+    rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.0800"))  # 8%
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class VatHistory(Base):
+    __tablename__ = "vat_history"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vat_config_id: Mapped[int] = mapped_column(ForeignKey("vat_configs.id"))
+    old_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4))
+    new_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4))
+    changed_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Post(Base):
+    __tablename__ = "posts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(Text, default="")
+    post_type: Mapped[str] = mapped_column(String(50), default="PRODUCT_INTRO")  # PRODUCT_INTRO, DAILY_SPECIAL, PROMOTION
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"), nullable=True)
+    image_urls: Mapped[str] = mapped_column(Text, default="")
+    quantity_limit: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    target_audience: Mapped[str] = mapped_column(String(50), default="ALL")  # ALL, INDIVIDUAL, GROUP, COLLECTIVE
+    target_customer_group: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sale_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    group_prices: Mapped[str] = mapped_column(Text, default="")  # JSON { "STUDENT": 27000, "GROUP_A": 25000 }
+    order_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    order_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivery_time_text: Mapped[str] = mapped_column(String(100), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 class Order(Base):
     __tablename__ = "orders"
     id: Mapped[int] = mapped_column(primary_key=True)
     order_number: Mapped[str] = mapped_column(String(30), unique=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    shop_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    shipper_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(30), default="PENDING", index=True)
-    delivery_type: Mapped[str] = mapped_column(String(30), default="PICKUP")
+    # 8 status: PENDING, CONFIRMED, PREPARING, READY_FOR_PICKUP, PICKED_UP, DELIVERING, COMPLETED, CANCELLED
+    delivery_type: Mapped[str] = mapped_column(String(30), default="PICKUP")  # PICKUP / CENTRAL hoặc HOME
     delivery_address: Mapped[str] = mapped_column(Text, default="")
-    delivery_fee: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    recipient_name: Mapped[str] = mapped_column(String(120), default="")
+    recipient_phone: Mapped[str] = mapped_column(String(30), default="")
+    expected_delivery_time: Mapped[str] = mapped_column(String(100), default="")
     subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    vat_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), default=Decimal("0.0800"))
+    vat_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    delivery_fee: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    debt_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    payment_status: Mapped[str] = mapped_column(String(30), default="UNPAID")  # UNPAID, PREPAID, PARTIAL, PAID, DEBT
+    payment_method: Mapped[str] = mapped_column(String(30), default="COD")     # COD, BANK_TRANSFER, WALLET
+    cash_collected_by_shipper: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -134,6 +213,45 @@ class OrderStatusHistory(Base):
     old_status: Mapped[str] = mapped_column(String(30))
     new_status: Mapped[str] = mapped_column(String(30))
     note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ProductReview(Base):
+    __tablename__ = "product_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
+    rating: Mapped[int] = mapped_column(Integer)  # 1 to 5
+    comment: Mapped[str] = mapped_column(Text, default="")
+    images: Mapped[str] = mapped_column(Text, default="")
+    shop_reply: Mapped[str] = mapped_column(Text, default="")
+    is_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ShipperReview(Base):
+    __tablename__ = "shipper_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shipper_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    rating: Mapped[int] = mapped_column(Integer)  # 1 to 5
+    attitude_rating: Mapped[int] = mapped_column(Integer, default=5)
+    speed_rating: Mapped[int] = mapped_column(Integer, default=5)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    receiver_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True, index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -10,12 +11,18 @@ from sqlalchemy.engine import make_url
 from app.api.v1.router import router
 from app.core.config import DEVELOPMENT_JWT_SECRETS, settings
 from app.core.logging import configure_logging
+from app.db.init_db import init_database
 
 configure_logging()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    try:
+        init_database()
+    except Exception as e:
+        logging.getLogger("freshflow.api").error(f"Database init warning: {e}")
+
     if settings.environment == "production":
         if settings.jwt_secret in DEVELOPMENT_JWT_SECRETS or settings.jwt_secret.startswith("replace-"):
             raise RuntimeError("JWT_SECRET must be configured in production")
