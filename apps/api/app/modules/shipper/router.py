@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, or_
 
 from app.api.deps import get_db, require_shipper
-from app.models import Order, User
+from app.models import Order, User, OrderStatusHistory
 from app.schemas import OrderOut, OrderStatusIn, OrderPaymentIn
 from app.modules.orders import service as order_service, repository as order_repo
 from app.core.notifications import add_notification
@@ -47,14 +47,29 @@ async def claim_order(
     order = order_repo.get_order(db, order_id, lock=True)
     if not order:
         raise HTTPException(404, "Không tìm thấy đơn hàng")
+    if order.status not in {"CONFIRMED", "PREPARING", "READY_FOR_PICKUP"}:
+        raise HTTPException(400, "Đơn hàng không ở trạng thái sẵn sàng để nhận")
+    if order.delivery_type not in {"HOME", "DELIVERY"}:
+        raise HTTPException(400, "Đơn hàng tự lấy hàng (PICKUP) không cần Shipper giao")
     if order.shipper_id and order.shipper_id != shipper.id:
         raise HTTPException(409, "Đơn hàng đã có Shipper khác phụ trách")
 
+    old_status = order.status
     order.shipper_id = shipper.id
-    if order.status == "PREPARING":
+    if order.status in {"CONFIRMED", "PREPARING"}:
         order.status = "READY_FOR_PICKUP"
     if order.shop_id:
         add_notification(db, order.shop_id, "Shipper đã nhận đơn", f"Shipper {shipper.full_name} đang đến lấy đơn {order.order_number}.", "order.assigned")
+
+    db.add(
+        OrderStatusHistory(
+            order_id=order.id,
+            changed_by=shipper.id,
+            old_status=old_status,
+            new_status=order.status,
+            note=f"Shipper {shipper.full_name} đã nhận phụ trách giao đơn",
+        )
+    )
     db.commit()
     db.refresh(order)
     order_repo.enrich_order_names(db, order)
@@ -101,10 +116,16 @@ async def mark_completed(
     order = await order_service.change_order_status(
         db, order_id, OrderStatusIn(status="COMPLETED", note=note), shipper
     )
-    if paid_amount is not None:
+    if paid_amount is not None and order.payment_method == "COD":
+        if paid_amount >= order.total:
+            p_status = "PAID"
+        elif paid_amount > Decimal("0"):
+            p_status = "PARTIAL"
+        else:
+            p_status = "UNPAID"
         payment_in = OrderPaymentIn(
             paid_amount=paid_amount,
-            payment_status="PAID" if paid_amount >= order.total else "PARTIAL",
+            payment_status=p_status,
             cash_collected=paid_amount,
             note="Shipper thu tiền khi giao thành công",
         )

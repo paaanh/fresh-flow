@@ -72,6 +72,7 @@ async function main() {
     ['PATCH', '/admin/product-requests/6', () => f.respondRequest(6, { status: 'QUOTED', quoted_price: 12000 })],
     ['GET', '/notifications', () => f.notifications()],
     ['PATCH', '/notifications/1/read', () => f.readNotification(1)],
+    ['POST', '/admin/notifications/broadcast', () => f.broadcastNotification({ title: 'Test Title', body: 'Test Body' })],
     ['POST', '/admin/moderation/terms?term=test+term', () => f.addModerationTerm('test term')],
     ['GET', '/admin/reports/summary?date_from=2026-10-01T00%3A00%3A00Z&date_to=2026-11-01T00%3A00%3A00Z', () => f.report('2026-10-01T00:00:00Z', '2026-11-01T00:00:00Z')],
     ['GET', '/admin/audit-logs?limit=100', () => f.auditLogs()],

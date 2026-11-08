@@ -9,9 +9,13 @@ export default function OrderStatusControl({ id, status, updateStatus }: { id: s
   const [selected, setSelected] = useState(status);
   const [saving, setSaving] = useState(false);
   const allowedStatuses: Record<string, string[]> = {
-    'Chờ duyệt': ['Đã duyệt', 'Từ chối', 'Đã hủy'],
-    'Đã duyệt': ['Đang chuẩn bị', 'Đã hủy'],
-    'Đang chuẩn bị': ['Đang giao', 'Hoàn thành', 'Đã hủy'],
+    'Chờ xác nhận': ['Đã xác nhận', 'Đang chuẩn bị', 'Từ chối', 'Đã hủy'],
+    'Chờ duyệt': ['Đã xác nhận', 'Đang chuẩn bị', 'Từ chối', 'Đã hủy'],
+    'Đã xác nhận': ['Đang chuẩn bị', 'Chờ Shipper lấy hàng', 'Đã hủy'],
+    'Đã duyệt': ['Đang chuẩn bị', 'Chờ Shipper lấy hàng', 'Đã hủy'],
+    'Đang chuẩn bị': ['Chờ Shipper lấy hàng', 'Đang giao', 'Hoàn thành', 'Đã hủy'],
+    'Chờ Shipper lấy hàng': ['Shipper đã lấy hàng', 'Đang giao', 'Đã hủy'],
+    'Shipper đã lấy hàng': ['Đang giao', 'Đã hủy'],
     'Đang giao': ['Hoàn thành', 'Đã hủy'],
   };
   const statuses = allowedStatuses[status] || [];

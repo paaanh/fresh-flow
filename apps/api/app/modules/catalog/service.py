@@ -11,7 +11,7 @@ from app.core.audit import write_audit
 from app.modules.catalog import repository
 from app.modules.inventory.service import close_batches_for_product, available_batches, available_quantity
 from app.models import Category, Product, User
-from app.schemas import ProductIn, ProductUpdateIn
+from app.schemas import CategoryIn, ProductIn, ProductUpdateIn
 from app.modules.pricing.service import unit_price
 
 PRODUCT_MEDIA_DIR = Path(__file__).resolve().parents[2] / "media" / "products"
@@ -96,8 +96,13 @@ def list_categories(db: Session):
     return repository.list_categories(db)
 
 
-def create_category(db: Session, name: str, admin: User):
-    category = Category(name=name.strip())
+def create_category(db: Session, payload: CategoryIn | str, admin: User):
+    if isinstance(payload, str):
+        cat_data = {"name": payload.strip()}
+    else:
+        cat_data = payload.model_dump()
+        cat_data["name"] = cat_data["name"].strip()
+    category = Category(**cat_data)
     repository.create_category(db, category)
     try:
         db.commit()
@@ -145,12 +150,12 @@ def update_product(db: Session, product_id: int, payload: ProductUpdateIn, opera
     if not product:
         raise HTTPException(404, "Không tìm thấy sản phẩm")
 
-    if operator.role == "SHOP" and product.shop_id and product.shop_id != operator.id:
-        raise HTTPException(403, "Bạn không có quyền sửa sản phẩm của Shop khác")
-    if operator.role == "SHOP" and product.shop_id is None:
-        product.shop_id = operator.id
+    if operator.role == "SHOP" and product.shop_id != operator.id:
+        raise HTTPException(403, "Bạn chỉ có thể chỉnh sửa sản phẩm do Shop của bạn tạo")
 
     for key, value in payload.model_dump(exclude_unset=True).items():
+        if value is None and key in {"name", "unit", "base_price", "is_active", "description", "images", "attached_services"}:
+            continue
         if key == "category_id" and value is not None and (repository.get_category(db, value) is None):
             raise HTTPException(404, "Không tìm thấy danh mục")
         setattr(product, key, value)

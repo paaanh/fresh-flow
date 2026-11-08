@@ -10,6 +10,7 @@ from urllib.parse import quote
 from sqlalchemy import select
 
 from app.db import SessionLocal
+from app.db.init_db import init_database
 from app.models import Category, InventoryBatch, Product
 
 
@@ -34,6 +35,11 @@ EXISTING_PRODUCT_IMAGE_ALIASES = {
 
 
 def normalize(value: str) -> str:
+    cleaned = value.lower().strip()
+    if cleaned == "dứa":
+        return "dua dua"
+    if cleaned == "dừa":
+        return "dua"
     value = unicodedata.normalize("NFD", value.lower().replace("đ", "d"))
     value = "".join(char for char in value if not unicodedata.combining(char))
     value = re.sub(r"^\d+[-\s]+", "", value)
@@ -115,6 +121,7 @@ def image_url(relative_path: Path) -> str:
 
 
 def import_products() -> tuple[int, int, int]:
+    init_database()
     if not PRODUCTS_DIR.is_dir():
         raise FileNotFoundError(f"Product images folder not found: {PRODUCTS_DIR}")
 

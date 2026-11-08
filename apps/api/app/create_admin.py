@@ -8,10 +8,12 @@ from sqlalchemy import select
 
 from app.core.security import hash_password
 from app.db import SessionLocal
+from app.db.init_db import init_database
 from app.models import User
 
 
 def main() -> None:
+    init_database()
     parser = argparse.ArgumentParser(description="Create the first FreshFlow administrator")
     parser.add_argument("--email", required=True, help="Administrator email address")
     parser.add_argument("--name", required=True, help="Administrator full name")

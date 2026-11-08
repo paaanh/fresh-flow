@@ -26,7 +26,7 @@ def init_database():
         if "shop_name" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN shop_name VARCHAR(150)"))
         if "shop_description" not in user_cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN shop_description TEXT"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN shop_description TEXT DEFAULT ''"))
         if "shop_address" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN shop_address VARCHAR(255) DEFAULT ''"))
         if "avatar_url" not in user_cols:
@@ -39,7 +39,7 @@ def init_database():
         if "parent_id" not in cat_cols:
             conn.execute(text("ALTER TABLE categories ADD COLUMN parent_id INTEGER"))
         if "description" not in cat_cols:
-            conn.execute(text("ALTER TABLE categories ADD COLUMN description TEXT"))
+            conn.execute(text("ALTER TABLE categories ADD COLUMN description TEXT DEFAULT ''"))
         if "icon" not in cat_cols:
             conn.execute(text("ALTER TABLE categories ADD COLUMN icon VARCHAR(100) DEFAULT ''"))
 
@@ -48,9 +48,9 @@ def init_database():
         if "shop_id" not in prod_cols:
             conn.execute(text("ALTER TABLE products ADD COLUMN shop_id INTEGER"))
         if "images" not in prod_cols:
-            conn.execute(text("ALTER TABLE products ADD COLUMN images TEXT"))
+            conn.execute(text("ALTER TABLE products ADD COLUMN images TEXT DEFAULT ''"))
         if "attached_services" not in prod_cols:
-            conn.execute(text("ALTER TABLE products ADD COLUMN attached_services TEXT"))
+            conn.execute(text("ALTER TABLE products ADD COLUMN attached_services TEXT DEFAULT ''"))
 
         # Orders columns
         order_cols = {col["name"] for col in inspector.get_columns("orders")}
@@ -80,6 +80,10 @@ def init_database():
             conn.execute(text("ALTER TABLE orders ADD COLUMN payment_method VARCHAR(30) DEFAULT 'COD'"))
         if "cash_collected_by_shipper" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN cash_collected_by_shipper NUMERIC(12, 2) DEFAULT 0"))
+
+        if not inspector.has_table("alembic_version"):
+            conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"))
+            conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0004_full_upgrade')"))
 
         conn.commit()
 

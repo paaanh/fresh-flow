@@ -6,7 +6,7 @@ import { freshflow, type AddressIn, type UserOut } from '@/lib/api';
 import { allocateOrderItems, type CatalogProduct } from '@/lib/order-payload';
 
 type Address = AddressIn & { id: number };
-type Slot = { id: number; name: string; fee: string | number; is_active: boolean };
+type Slot = { id: number; name: string; fee: string | number; start_time?: string; end_time?: string; is_active: boolean };
 export type CheckoutDetails = {
   delivery: string;
   addressId: number;
@@ -233,15 +233,23 @@ export function ApiCheckout({ money, total, cart, done }: {
   const [batchError, setBatchError] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [vatRate, setVatRate] = useState(0.08);
 
-  const vatRate = 0.08; // 8% VAT
+  const selectedSlot = slots.find(slot => slot.id === slotId);
+  const fee = pickup ? Number(selectedSlot?.fee || 0) : Number(selectedSlot ? selectedSlot.fee : 20000);
   const vatAmount = Math.round(total * vatRate);
-  const fee = pickup ? 0 : Number(slots.find(slot => slot.id === slotId)?.fee || 20000);
   const grandTotal = total + vatAmount + fee;
 
   useEffect(() => {
     let alive = true;
     setLoaded(false);
+    freshflow.vatConfigs<any>()
+      .then(configs => {
+        if (!alive) return;
+        const active = (configs || []).find((c: any) => c.is_active && !c.category_id);
+        if (active) setVatRate(Number(active.rate));
+      })
+      .catch(() => {});
     Promise.all([
       freshflow.addresses<Address>(),
       freshflow.deliverySlots<Slot>(),
@@ -337,6 +345,25 @@ export function ApiCheckout({ money, total, cart, done }: {
         </div>
       )}
 
+      {/* Delivery slot selection */}
+      {slots.length > 0 && (
+        <div className="space-y-2 rounded-xl bg-[#f9fbf9] p-4 border border-[#e8ede8]">
+          <label className="block text-xs font-bold text-[#3d5045]">Khung giờ giao hàng</label>
+          <select
+            className={field}
+            value={slotId || ''}
+            onChange={event => setSlotId(Number(event.target.value))}
+          >
+            <option value="">Chọn khung giờ (mặc định)...</option>
+            {slots.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name}{s.start_time ? ` (${s.start_time} - ${s.end_time || ''})` : ''}{Number(s.fee) > 0 ? ` - Phí: ${money(Number(s.fee))}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Payment method */}
       <div>
         <label className="block text-xs font-bold text-[#3d5045] mb-1.5">Phương thức thanh toán</label>
@@ -379,7 +406,7 @@ export function ApiCheckout({ money, total, cart, done }: {
           <span>{money(total)}</span>
         </div>
         <div className="flex justify-between text-[#627369]">
-          <span>Thuế VAT (8% theo quy định):</span>
+          <span>Thuế VAT ({Math.round(vatRate * 100)}% theo quy định):</span>
           <span className="font-semibold text-[#1f2d25]">{money(vatAmount)}</span>
         </div>
         <div className="flex justify-between text-[#627369]">

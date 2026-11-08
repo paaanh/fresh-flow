@@ -157,3 +157,266 @@ export function ReportsPanel({ money, orders }: { money: (value: number) => stri
   ];
   return <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div key={label} className="panel p-5"><span className="text-xs text-slate-400">{label}</span><div className="mt-2 text-xl font-extrabold text-[#1e2e26]">{value}</div></div>)}</div>;
 }
+
+export function ModerationView({ notify }: { notify: (msg: string) => void }) {
+  const [term, setTerm] = useState('');
+  const [terms, setTerms] = useState<string[]>(['hỏng', 'lừa đảo', 'hàng giả', 'thối rữa']);
+  const [busy, setBusy] = useState(false);
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!term.trim()) return;
+    setBusy(true);
+    try {
+      await freshflow.addModerationTerm(term.trim());
+      setTerms(prev => [...prev, term.trim()]);
+      setTerm('');
+      notify('Đã thêm từ khóa kiểm duyệt nội dung.');
+    } catch (err: any) {
+      notify(err?.message || 'Không thêm được từ khóa.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel p-6 space-y-6">
+      <div>
+        <h2 className="text-base font-extrabold text-[#1e2e26]">Kiểm duyệt nội dung tự động</h2>
+        <p className="mt-1 text-xs text-slate-500">Chặn các bài đăng, bình luận hoặc tin nhắn chứa từ ngữ vi phạm quy định sàn.</p>
+      </div>
+
+      <form onSubmit={handleAdd} className="flex gap-3 max-w-md">
+        <input
+          value={term}
+          onChange={e => setTerm(e.target.value)}
+          placeholder="Nhập từ khóa cần chặn..."
+          className="flex-1 rounded-xl border border-[#d2ddd5] px-3.5 py-2 text-xs focus:outline-none focus:border-[#176b52]"
+        />
+        <Button disabled={busy}>{busy ? 'Đang thêm…' : 'Thêm từ khóa'}</Button>
+      </form>
+
+      <div>
+        <h3 className="text-xs font-bold text-slate-600 mb-3">Từ khóa đang được kiểm duyệt ({terms.length})</h3>
+        <div className="flex flex-wrap gap-2">
+          {terms.map((t, idx) => (
+            <span key={idx} className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-700">
+              {t}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function SettingsView() {
+  return (
+    <div className="space-y-6">
+      <div className="panel p-6 space-y-4">
+        <h2 className="text-base font-extrabold text-[#1e2e26]">Cài đặt hệ thống FreshFlow</h2>
+        <p className="text-xs text-slate-500">Cấu hình thông số kỹ thuật, API và thông báo sàn.</p>
+        <div className="grid gap-4 sm:grid-cols-2 text-xs">
+          <div className="rounded-xl border border-slate-100 p-4 bg-slate-50">
+            <span className="font-bold text-slate-700">Phiên bản nền tảng:</span>
+            <div className="mt-1 text-slate-500">FreshFlow v0.1.0 Enterprise</div>
+          </div>
+          <div className="rounded-xl border border-slate-100 p-4 bg-slate-50">
+            <span className="font-bold text-slate-700">Môi trường API:</span>
+            <div className="mt-1 text-slate-500">FastAPI + Next.js App Router</div>
+          </div>
+          <div className="rounded-xl border border-slate-100 p-4 bg-slate-50">
+            <span className="font-bold text-slate-700">Realtime WebSocket:</span>
+            <div className="mt-1 text-emerald-600 font-semibold">Kích hoạt (SSE / WS Event Bus)</div>
+          </div>
+          <div className="rounded-xl border border-slate-100 p-4 bg-slate-50">
+            <span className="font-bold text-slate-700">Bảo mật giao dịch:</span>
+            <div className="mt-1 text-slate-500">JWT Token Auth + Role-Based Access Control</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AdminNotificationsView({
+  notifications,
+  notify,
+  onReload,
+  markRead,
+  clearAll,
+}: {
+  notifications: { id: number; title: string; body: string; event_type: string; is_read: boolean; created_at?: string }[];
+  notify: (msg: string) => void;
+  onReload?: () => void;
+  markRead: (id: number) => Promise<void>;
+  clearAll: () => Promise<void>;
+}) {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [targetRole, setTargetRole] = useState<'ALL' | 'CUSTOMER' | 'SHOP' | 'SHIPPER'>('ALL');
+  const [busy, setBusy] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
+
+  const handleBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || !body.trim()) return;
+    setBusy(true);
+    setSuccessMsg('');
+    try {
+      const res = await freshflow.broadcastNotification<{ message: string; recipients_count: number }>({
+        title: title.trim(),
+        body: body.trim(),
+        target_role: targetRole === 'ALL' ? null : targetRole,
+      });
+      const msg = res?.message || 'Đã gửi thông báo đến toàn bộ người dùng.';
+      setSuccessMsg(msg);
+      notify(msg);
+      setTitle('');
+      setBody('');
+      onReload?.();
+    } catch (err: any) {
+      notify(err?.message || 'Không thể gửi thông báo.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Broadcast Form Panel */}
+      <section className="panel p-6 space-y-5">
+        <div className="border-b border-[#f0f4f1] pb-3">
+          <h2 className="text-base font-extrabold text-[#1e2e26]">Gửi thông báo toàn hệ thống</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Phát thông báo đẩy đến tất cả người dùng hoặc lọc theo vai trò (Khách hàng, Cửa hàng, Tài xế).
+          </p>
+        </div>
+
+        {successMsg && (
+          <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs font-semibold text-emerald-800">
+            {successMsg}
+          </div>
+        )}
+
+        <form onSubmit={handleBroadcast} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-[#3d5045] mb-1">Đối tượng nhận thông báo</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              {[
+                { id: 'ALL', label: 'Tất cả người dùng' },
+                { id: 'CUSTOMER', label: 'Chỉ Khách hàng' },
+                { id: 'SHOP', label: 'Chỉ Cửa hàng (Shop)' },
+                { id: 'SHIPPER', label: 'Chỉ Tài xế (Shipper)' },
+              ].map(opt => (
+                <label
+                  key={opt.id}
+                  className={`flex items-center gap-2 rounded-xl border p-2.5 cursor-pointer text-xs font-semibold ${
+                    targetRole === opt.id
+                      ? 'border-[#176b52] bg-[#f4f9f6] text-[#176b52]'
+                      : 'border-[#e8ede8] text-[#55695f] hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="targetRole"
+                    checked={targetRole === opt.id}
+                    onChange={() => setTargetRole(opt.id as any)}
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-[#3d5045] mb-1">Tiêu đề thông báo *</label>
+            <input
+              required
+              minLength={2}
+              maxLength={160}
+              placeholder="Ví dụ: Lịch bảo trì hệ thống hoặc Ưu đãi nông sản hôm nay..."
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              className="w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-[#3d5045] mb-1">Nội dung chi tiết *</label>
+            <textarea
+              required
+              minLength={2}
+              maxLength={2000}
+              rows={3}
+              placeholder="Nội dung thông báo gửi đến người dùng..."
+              value={body}
+              onChange={e => setBody(e.target.value)}
+              className="w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+            />
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-xl bg-[#176b52] px-6 py-2.5 text-xs font-bold text-white shadow-md hover:bg-[#125340] disabled:opacity-50"
+            >
+              {busy ? 'Đang gửi thông báo…' : 'Phát thông báo ngay'}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* Notifications List */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-[#1e2e26]">Hộp thư thông báo của bạn</h3>
+            <p className="text-[11px] text-slate-400">Xem và quản lý các thông báo nhận được</p>
+          </div>
+          <button onClick={() => void clearAll()} className="text-xs font-bold text-[#176b52] hover:underline">
+            Đánh dấu tất cả đã đọc
+          </button>
+        </div>
+
+        {notifications.length === 0 && (
+          <div className="panel p-10 text-center text-sm text-slate-500">Chưa có thông báo nào.</div>
+        )}
+
+        {notifications.map(item => (
+          <article
+            key={item.id}
+            className={`panel flex items-start gap-3 p-4 ${
+              item.is_read ? 'opacity-70' : 'border-emerald-200 bg-emerald-50/40'
+            }`}
+          >
+            <span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-600 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-bold text-[#1f2d25]">{item.title}</h4>
+                {item.event_type === 'system.broadcast' && (
+                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800">
+                    Toàn sàn
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-slate-600">{item.body}</p>
+              <time className="mt-2 block text-[10px] text-slate-400">
+                {item.created_at ? new Date(item.created_at).toLocaleString('vi-VN') : item.event_type}
+              </time>
+            </div>
+            {!item.is_read && (
+              <button
+                onClick={() => void markRead(item.id)}
+                className="text-xs font-semibold text-[#176b52] hover:underline shrink-0"
+              >
+                Đã đọc
+              </button>
+            )}
+          </article>
+        ))}
+      </section>
+    </div>
+  );
+}

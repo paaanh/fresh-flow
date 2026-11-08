@@ -28,6 +28,7 @@ interface ShopPortalViewProps {
   reviews: ProductReview[];
   shippers: User[];
   onAddProduct: () => void;
+  onAddCategory?: () => void;
   onEditProduct: (product: Product) => void;
   onUpdateOrderStatus: (orderId: string, status: string, note?: string) => Promise<boolean>;
   onAssignShipper: (orderApiId: number, shipperId: number) => Promise<void>;
@@ -44,6 +45,7 @@ export default function ShopPortalView({
   reviews,
   shippers,
   onAddProduct,
+  onAddCategory,
   onEditProduct,
   onUpdateOrderStatus,
   onAssignShipper,
@@ -101,7 +103,16 @@ export default function ShopPortalView({
             </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {onAddCategory && (
+              <button
+                onClick={onAddCategory}
+                className="flex items-center gap-2 rounded-xl bg-white/20 border border-white/40 px-4 py-2 text-xs font-bold text-white shadow transition hover:bg-white/30"
+              >
+                <FontAwesomeIcon icon={faPlus} />
+                Thêm danh mục
+              </button>
+            )}
             <button
               onClick={onAddProduct}
               className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-xs font-bold text-[#176b52] shadow transition hover:bg-slate-100"
@@ -178,13 +189,24 @@ export default function ShopPortalView({
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-sm font-bold text-[#1e2d25]">Danh sách sản phẩm của Shop</h3>
-            <button
-              onClick={onAddProduct}
-              className="rounded-xl bg-[#176b52] px-4 py-2 text-xs font-bold text-white shadow hover:bg-[#125340]"
-            >
-              <FontAwesomeIcon icon={faPlus} className="mr-1.5" />
-              Thêm mặt hàng
-            </button>
+            <div className="flex gap-2">
+              {onAddCategory && (
+                <button
+                  onClick={onAddCategory}
+                  className="rounded-xl border border-[#176b52] bg-white px-3.5 py-2 text-xs font-bold text-[#176b52] shadow-sm hover:bg-emerald-50 transition"
+                >
+                  <FontAwesomeIcon icon={faPlus} className="mr-1.5" />
+                  Thêm danh mục
+                </button>
+              )}
+              <button
+                onClick={onAddProduct}
+                className="rounded-xl bg-[#176b52] px-4 py-2 text-xs font-bold text-white shadow hover:bg-[#125340] transition"
+              >
+                <FontAwesomeIcon icon={faPlus} className="mr-1.5" />
+                Thêm mặt hàng
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">

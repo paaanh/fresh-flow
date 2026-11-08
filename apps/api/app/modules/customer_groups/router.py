@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.api.deps import get_db, require_admin, get_current_user
 from app.models import CustomerGroup, User
@@ -23,12 +23,13 @@ def create_customer_group(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    existing = db.scalar(select(CustomerGroup).where(CustomerGroup.code == payload.code))
+    code_upper = payload.code.strip().upper()
+    existing = db.scalar(select(CustomerGroup).where(func.upper(CustomerGroup.code) == code_upper))
     if existing:
         raise HTTPException(409, "Mã nhóm khách hàng đã tồn tại")
 
     grp = CustomerGroup(
-        code=payload.code.upper(),
+        code=code_upper,
         name=payload.name,
         description=payload.description,
         discount_percent=payload.discount_percent,

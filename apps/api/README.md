@@ -104,7 +104,7 @@ Tất cả REST endpoint nằm dưới `/api/v1`. Các endpoint `/admin/*` yêu 
 | Admin đơn/giao | `PATCH /admin/orders/{id}/status`, `GET /orders/{id}/history`, `POST /admin/delivery-slots` |
 | Yêu cầu mặt hàng | `POST/GET /product-requests`, `PATCH /admin/product-requests/{id}` |
 | Realtime/thông báo | `WS /api/v1/ws?token={access_token}`, `GET /notifications`, `PATCH /notifications/{id}/read` |
-| Ki?m duy?t | `POST /admin/moderation/terms` |
+| Kiểm duyệt | `POST /admin/moderation/terms` |
 | Báo cáo/quản trị | `GET /admin/reports/summary`, `GET /admin/users`, `GET /admin/audit-logs` |
 
 WebSocket server events có envelope `{event_id, type, occurred_at, data}`. Sự kiện chính: `connection.ready`, `inventory.updated`, `order.status_changed`, `notification.created`.
@@ -123,7 +123,7 @@ WebSocket server events có envelope `{event_id, type, occurred_at, data}`. Sự
 
 
 
-Compose ??c bi?n t? `.env` ? th? m?c g?c. Tr?n PowerShell, t?o file b?ng `Copy-Item .env.example .env`, thay c?c gi? tr? m?u v? kh?ng commit `.env`. M?c ??nh trong Compose ch? ph?c v? local development. Khi `ENVIRONMENT=production`, ?ng d?ng t? ch?i JWT secret m?u, SQLite v? m?t kh?u database development.
+Compose đọc biến từ `.env` ở thư mục gốc. Trên PowerShell, tạo file bằng `Copy-Item .env.example .env`, thay các giá trị mẫu và không commit `.env`. Mặc định trong Compose chỉ phục vụ local development. Khi `ENVIRONMENT=production`, ứng dụng từ chối JWT secret mẫu, SQLite và mật khẩu database development.
 
 ## Module structure and production configuration
 

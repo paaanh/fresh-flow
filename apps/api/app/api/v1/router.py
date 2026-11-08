@@ -17,7 +17,7 @@ from app.realtime.router import router as realtime_router
 # New modules
 from app.modules.shipper.router import router as shipper_router
 from app.modules.posts.router import router as posts_router
-from app.modules.vat.router import router as vat_router
+from app.modules.vat.router import router as vat_router, active_vat_router
 from app.modules.customer_groups.router import router as customer_groups_router
 from app.modules.reviews.router import router as reviews_router
 from app.modules.chat.router import router as chat_router
@@ -42,6 +42,7 @@ router.include_router(realtime_router)
 router.include_router(shipper_router)
 router.include_router(posts_router)
 router.include_router(vat_router)
+router.include_router(active_vat_router)
 router.include_router(customer_groups_router)
 router.include_router(reviews_router)
 router.include_router(chat_router)

@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.core.security import hash_password
 from app.db import Base, get_db
 from app.main import app
@@ -16,6 +17,8 @@ from app.models import Category, InventoryBatch, Product, User
 
 @pytest.fixture
 def client():
+    prev_env = settings.environment
+    settings.environment = "test"
     test_database_url = os.getenv("FRESHFLOW_TEST_DATABASE_URL")
     if test_database_url:
         engine = create_engine(test_database_url, pool_pre_ping=True)
@@ -73,6 +76,7 @@ def client():
         with TestClient(app) as test_client:
             yield test_client
     finally:
+        settings.environment = prev_env
         app.dependency_overrides.clear()
         Base.metadata.drop_all(engine)
         engine.dispose()
@@ -128,3 +132,36 @@ def test_auth_catalog_backend_image_and_order_approval(client: TestClient):
     catalog = client.get("/api/v1/catalog/me", headers=customer_headers)
     assert catalog.status_code == 200, catalog.text
     assert Decimal(str(catalog.json()[0]["available_quantity"])) == Decimal("8.000")
+
+    # Broadcast notification test
+    forbidden = client.post(
+        "/api/v1/admin/notifications/broadcast",
+        headers=customer_headers,
+        json={"title": "Hack Attempt", "body": "Unauthorized broadcast"},
+    )
+    assert forbidden.status_code == 403
+
+    broadcast = client.post(
+        "/api/v1/admin/notifications/broadcast",
+        headers=admin_headers,
+        json={"title": "Thông báo toàn sàn", "body": "Chào mừng quý khách đến với FreshFlow!"},
+    )
+    assert broadcast.status_code == 201
+    assert broadcast.json()["success"] is True
+    assert broadcast.json()["recipients_count"] >= 2
+
+    customer_notices = client.get("/api/v1/notifications", headers=customer_headers)
+    assert customer_notices.status_code == 200
+    assert any(n["title"] == "Thông báo toàn sàn" for n in customer_notices.json())
+
+    # Chat available users test
+    admin_chat_users = client.get("/api/v1/chat/users", headers=admin_headers)
+    assert admin_chat_users.status_code == 200
+    assert len(admin_chat_users.json()) >= 1
+    assert any(u["role"] == "CUSTOMER" for u in admin_chat_users.json())
+
+    # Customer can only chat with SHOP / ADMIN
+    customer_chat_users = client.get("/api/v1/chat/users", headers=customer_headers)
+    assert customer_chat_users.status_code == 200
+    assert len(customer_chat_users.json()) >= 1
+    assert all(u["role"] in {"SHOP", "ADMIN"} for u in customer_chat_users.json())

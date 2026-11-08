@@ -19,6 +19,7 @@ import {
   faStore,
   faUser,
   faUserGroup,
+  faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 
 import { Badge, Button } from '@/features/customer/pages/shared-ui';
@@ -49,7 +50,7 @@ import type {
   User as DomainUser,
 } from '@/types/domain';
 import HomePage from '@/features/home-page';
-import { InventoryView, Deliveries, CustomersView, ReportsPanel } from '@/features/admin/pages';
+import { InventoryView, Deliveries, CustomersView, ReportsPanel, ModerationView, SettingsView, AdminNotificationsView } from '@/features/admin/pages';
 import { adminSections, customerSections, defaultFinancialSummary, money, normalizeOrder, normalizeProduct, normalizeRequest, shipperSections, shopSections, titleMap, toApiOrderStatus } from '@/features/customer/page-model';
 
 // Specialized module components
@@ -58,6 +59,7 @@ import AdminDashboardView from '@/components/admin-dashboard-view';
 import ShopPortalView from '@/components/shop-portal-view';
 import ShipperPortalView from '@/components/shipper-portal-view';
 import ChatModal from '@/components/chat-modal';
+import ChatView from '@/components/chat-view';
 import ReviewModal from '@/components/reviews-modal';
 import ProductEditorModal, { type ProductDraft } from '@/components/product-editor-modal';
 
@@ -88,7 +90,12 @@ export default function FreshFlow() {
   const [toast, setToast] = useState('');
   const [productEditorOpen, setProductEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [, setModal] = useState('');
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState({ name: '', description: '' });
+  const [categoryBusy, setCategoryBusy] = useState(false);
+  const [modal, setModal] = useState('');
+  const [requestDraft, setRequestDraft] = useState({ name: '', description: '' });
+  const [requestBusy, setRequestBusy] = useState(false);
   const [activeTab, setActiveTab] = useState('Tất cả');
   const [notifications, setNotifications] = useState<{ id: number; title: string; body: string; event_type: string; is_read: boolean; created_at?: string }[]>([]);
   const [currentUser, setCurrentUser] = useState<DomainUser | undefined>();
@@ -187,7 +194,7 @@ export default function FreshFlow() {
 
         const refreshSnapshot = async () => {
           const results = await Promise.allSettled([
-            freshflow.products<any>(),
+            freshflow.catalog<any>().catch(() => freshflow.products<any>()),
             normalizedRole === 'shipper'
               ? Promise.all([freshflow.shipperOrders<any>(undefined, false), freshflow.shipperOrders<any>(undefined, true)]).then(([assigned, available]) => [...assigned, ...available])
               : freshflow.orders<any>(),
@@ -195,9 +202,13 @@ export default function FreshFlow() {
             freshflow.notifications<any>(),
             freshflow.categories<any>(),
             freshflow.posts<any>(),
-            freshflow.vatConfigs<any>(),
-            freshflow.vatHistory<any>(),
-            freshflow.dashboardFinancialSummary<any>(),
+            normalizedRole === 'admin' ? freshflow.adminVatConfigs<any>() : freshflow.vatConfigs<any>(),
+            normalizedRole === 'admin' ? freshflow.vatHistory<any>() : Promise.resolve([]),
+            normalizedRole === 'admin'
+              ? freshflow.dashboardFinancialSummary<any>()
+              : normalizedRole === 'shop'
+              ? freshflow.shopFinancialSummary<any>()
+              : Promise.resolve(defaultFinancialSummary),
             freshflow.shippers(),
             normalizedRole === 'shop' ? freshflow.shopReviews<any>() : Promise.resolve([]),
           ]);
@@ -218,14 +229,16 @@ export default function FreshFlow() {
             reviewsRes,
           ] = results;
 
+          const loadedCats = catsRes.status === 'fulfilled' ? unwrapList<any>(catsRes.value) : [];
+          if (catsRes.status === 'fulfilled') {
+            setCategories(loadedCats.map((category: any) => ({ id: Number(category.id), name: category.name })));
+          }
           if (prodsRes.status === 'fulfilled') {
-            const categories = catsRes.status === 'fulfilled' ? unwrapList<any>(catsRes.value) : [];
-            setCategories(categories.map((category: any) => ({ id: Number(category.id), name: category.name })));
             setProducts(
               unwrapList<any>(prodsRes.value).map(p =>
                 normalizeProduct({
                   ...p,
-                  category_name: categories.find(c => c.id === p.category_id)?.name,
+                  category_name: loadedCats.find(c => c.id === p.category_id)?.name,
                 })
               )
             );
@@ -381,11 +394,13 @@ export default function FreshFlow() {
     return true;
   };
 
-  const updateRequest = async (id: number, status: string) => {
+  const updateRequest = async (id: number, status: string, quotedPrice?: number) => {
     if (apiState === 'live') {
       try {
         await api.patch(`/admin/product-requests/${id}`, {
           status: status === 'Đã báo giá' ? 'QUOTED' : status,
+          quoted_price: quotedPrice,
+          admin_response: quotedPrice ? `Đã có nguồn hàng, giá dự kiến ${money(quotedPrice)}` : 'Đã duyệt yêu cầu',
         });
       } catch (error) {
         notify(error instanceof Error ? error.message : 'Không cập nhật được yêu cầu');
@@ -401,7 +416,17 @@ export default function FreshFlow() {
       notify('Mất kết nối máy chủ. Sản phẩm chưa được lưu.');
       return false;
     }
-    const categoryId = categories.find(category => category.name === draft.category)?.id;
+    let categoryId = categories.find(category => category.name === draft.category)?.id;
+    if (!categoryId && draft.category.trim()) {
+      try {
+        const createdCat = await freshflow.createCategory<any>(draft.category.trim());
+        categoryId = Number(createdCat.id);
+        setCategories(prev => [...prev, { id: categoryId!, name: createdCat.name }]);
+      } catch {
+        notify('Danh mục này chưa tồn tại. Hãy thêm danh mục mới trước.');
+        return false;
+      }
+    }
     if (!categoryId) {
       notify('Danh mục này chưa tồn tại. Hãy chọn một danh mục có sẵn.');
       return false;
@@ -457,7 +482,7 @@ export default function FreshFlow() {
       await freshflow.readNotification(id);
       setNotifications(current => current.map(item => item.id === id ? { ...item, is_read: true } : item));
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Kh?ng c?p nh?t ???c th?ng b?o.');
+      notify(error instanceof Error ? error.message : 'Không cập nhật được thông báo.');
     }
   };
 
@@ -529,6 +554,16 @@ export default function FreshFlow() {
       notify('Đã đăng bài quảng bá lên Newfeed thành công!');
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Không thể đăng bài');
+    }
+  };
+
+  const handleUpdatePost = async (postId: number, postData: any) => {
+    try {
+      const updated = await freshflow.updatePost<Post>(postId, postData);
+      setPosts(current => current.map(p => (p.id === postId ? updated : p)));
+      notify('Đã cập nhật bài đăng và giá bán thành công!');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Không thể cập nhật bài đăng');
     }
   };
 
@@ -610,8 +645,8 @@ export default function FreshFlow() {
   };
 
   // Chat actions
-  const openChatWith = async (peerId?: number) => {
-    setIsChatOpen(true);
+  const openChatWith = async (peerId?: number, openModal = true) => {
+    if (openModal) setIsChatOpen(true);
     if (peerId) {
       setActivePeerId(peerId);
       activePeerRef.current = peerId;
@@ -632,8 +667,14 @@ export default function FreshFlow() {
     }
   };
 
+  const handleSelectPeer = (peerId: number) => {
+    setActivePeerId(peerId);
+    activePeerRef.current = peerId;
+    void openChatWith(peerId, false);
+  };
+
   useEffect(() => {
-    if (page === 'chat') void openChatWith();
+    if (page === 'chat') void openChatWith(undefined, false);
   }, [page]);
 
   const handleSendChatMessage = async (content: string, peerId?: number, orderId?: number) => {
@@ -874,9 +915,6 @@ export default function FreshFlow() {
                   <Button kind="secondary"><FontAwesomeIcon icon={faPlus} /> Yêu cầu mặt hàng</Button>
                 </Link>
               )}
-              {page === 'products' && (admin || shop) && (
-                <Button onClick={() => { setEditingProduct(null); setProductEditorOpen(true); }}><FontAwesomeIcon icon={faPlus} /> Thêm sản phẩm</Button>
-              )}
             </div>
           </div>
 
@@ -890,6 +928,7 @@ export default function FreshFlow() {
               currentUser={currentUser}
               onAddToCart={addCart}
               onCreatePost={handleCreatePost}
+              onUpdatePost={handleUpdatePost}
               money={money}
             />
           )}
@@ -915,6 +954,7 @@ export default function FreshFlow() {
               reviews={reviews}
               shippers={shippers}
               onAddProduct={() => { setEditingProduct(null); setProductEditorOpen(true); }}
+              onAddCategory={() => setCategoryModalOpen(true)}
               onEditProduct={product => { setEditingProduct(product); setProductEditorOpen(true); }}
               onAdjustInventory={adjustInventory}
               initialTab={page === 'products' ? 'products' : page === 'orders' ? 'orders' : page === 'reviews' ? 'reviews' : 'overview'}
@@ -947,11 +987,13 @@ export default function FreshFlow() {
               setQuery={setQuery}
               admin={admin}
               products={filtered}
+              categories={categories.map(c => c.name)}
               category={category}
               setCategory={setCategory}
               addCart={addCart}
               money={money}
               create={() => { setEditingProduct(null); setProductEditorOpen(true); }}
+              createCategory={() => setCategoryModalOpen(true)}
               go={path => router.push(admin && isAdminRoute ? `/admin${path}` : path)}
               save={saveProductInline}
               remove={deleteProduct}
@@ -1023,12 +1065,53 @@ export default function FreshFlow() {
           {/* REPORTS */}
           {page === 'reports' && <ReportsPanel money={money} apiState={apiState} orders={orders} />}
 
+          {/* MODERATION */}
+          {page === 'moderation' && <ModerationView notify={notify} />}
+
+          {/* SETTINGS */}
+          {page === 'settings' && <SettingsView />}
+
+          {/* HELP & GUIDES */}
+          {page === 'help' && <Help />}
+          {page === 'order-guide' && <GuidePage type="orders" />}
+          {page === 'delivery-guide' && <GuidePage type="delivery" />}
+
+          {/* ADMIN ONLY ACCESS GUARD */}
+          {adminOnly.includes(page) && !admin && (
+            <div className="panel p-10 text-center">
+              <h2 className="text-base font-bold text-rose-700">Quyền truy cập bị từ chối</h2>
+              <p className="mt-2 text-xs text-slate-500">Khu vực này chỉ dành riêng cho Quản trị viên (Admin).</p>
+            </div>
+          )}
+
           {page === 'notifications' && (
-            <section className="space-y-3">
-              <div className="flex items-center justify-between"><h2 className="text-lg font-bold">Thông báo</h2><button onClick={() => void clearNotifications()} className="text-xs font-bold text-[#176b52]">Đánh dấu tất cả đã đọc</button></div>
-              {notifications.length === 0 && <div className="panel p-10 text-center text-sm text-slate-500">Bạn chưa có thông báo nào.</div>}
-              {notifications.map(item => <article key={item.id} className={`panel flex items-start gap-3 p-4 ${item.is_read ? 'opacity-70' : 'border-emerald-200 bg-emerald-50/40'}`}><span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-600" /><div className="flex-1"><h3 className="text-sm font-bold">{item.title}</h3><p className="mt-1 text-xs text-slate-600">{item.body}</p><time className="mt-2 block text-[10px] text-slate-400">{item.created_at ? new Date(item.created_at).toLocaleString('vi-VN') : item.event_type}</time></div>{!item.is_read && <button onClick={() => void markNotificationRead(item.id)} className="text-xs font-semibold text-[#176b52]">Đã đọc</button>}</article>)}
-            </section>
+            admin ? (
+              <AdminNotificationsView
+                notifications={notifications}
+                notify={notify}
+                onReload={() => setReload(r => r + 1)}
+                markRead={markNotificationRead}
+                clearAll={clearNotifications}
+              />
+            ) : (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between"><h2 className="text-lg font-bold">Thông báo</h2><button onClick={() => void clearNotifications()} className="text-xs font-bold text-[#176b52]">Đánh dấu tất cả đã đọc</button></div>
+                {notifications.length === 0 && <div className="panel p-10 text-center text-sm text-slate-500">Bạn chưa có thông báo nào.</div>}
+                {notifications.map(item => <article key={item.id} className={`panel flex items-start gap-3 p-4 ${item.is_read ? 'opacity-70' : 'border-emerald-200 bg-emerald-50/40'}`}><span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-600 shrink-0" /><div className="flex-1 min-w-0"><h3 className="text-sm font-bold">{item.title}</h3><p className="mt-1 text-xs text-slate-600">{item.body}</p><time className="mt-2 block text-[10px] text-slate-400">{item.created_at ? new Date(item.created_at).toLocaleString('vi-VN') : item.event_type}</time></div>{!item.is_read && <button onClick={() => void markNotificationRead(item.id)} className="text-xs font-semibold text-[#176b52]">Đã đọc</button>}</article>)}
+              </section>
+            )
+          )}
+
+          {/* REALTIME CHAT PAGE */}
+          {page === 'chat' && (
+            <ChatView
+              currentUser={currentUser}
+              conversations={conversations}
+              activePeerId={activePeerId}
+              messages={chatMessages}
+              onSelectPeer={handleSelectPeer}
+              onSendMessage={handleSendChatMessage}
+            />
           )}
 
           {/* PROFILE & ADDRESSES */}
@@ -1081,10 +1164,7 @@ export default function FreshFlow() {
         conversations={conversations}
         activePeerId={activePeerId}
         messages={chatMessages}
-        onSelectPeer={peerId => {
-          setActivePeerId(peerId);
-          openChatWith(peerId);
-        }}
+        onSelectPeer={handleSelectPeer}
         onSendMessage={handleSendChatMessage}
       />
 
@@ -1097,6 +1177,208 @@ export default function FreshFlow() {
         targetTitle={reviewModalData.title}
         onSubmit={handleSubmitReview}
       />
+
+      {/* Product Editor Modal */}
+      {productEditorOpen && (
+        <ProductEditorModal
+          product={editingProduct}
+          categories={Array.from(
+            new Set([
+              ...(categories.length > 0 ? categories.map(c => c.name) : ['Trái cây', 'Rau củ', 'Thực phẩm']),
+              ...products.map(p => p.category).filter(Boolean),
+            ])
+          )}
+          onClose={() => {
+            setProductEditorOpen(false);
+            setEditingProduct(null);
+          }}
+          onSave={async (draft, existing) => {
+            const success = await saveProduct(draft, existing);
+            if (success) {
+              setProductEditorOpen(false);
+              setEditingProduct(null);
+            }
+            return success;
+          }}
+        />
+      )}
+
+      {/* Category Creation Modal */}
+      {categoryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex justify-between items-center pb-3 border-b border-[#edf2ee]">
+              <div>
+                <h3 className="font-extrabold text-[#1a2d24] text-base">Thêm danh mục sản phẩm mới</h3>
+                <p className="mt-0.5 text-xs text-slate-500">Mở rộng danh mục mặt hàng hiển thị trên toàn sàn</p>
+              </div>
+              <button onClick={() => setCategoryModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+            <form
+              onSubmit={async e => {
+                e.preventDefault();
+                const cleanName = categoryDraft.name.trim();
+                if (!cleanName) return;
+                setCategoryBusy(true);
+                try {
+                  if (apiState === 'live') {
+                    const created = await freshflow.createCategory<any>(cleanName, categoryDraft.description.trim() || undefined);
+                    setCategories(prev =>
+                      prev.some(c => c.name.toLowerCase() === cleanName.toLowerCase())
+                        ? prev
+                        : [...prev, { id: Number(created.id), name: created.name || cleanName }]
+                    );
+                  } else {
+                    setCategories(prev =>
+                      prev.some(c => c.name.toLowerCase() === cleanName.toLowerCase())
+                        ? prev
+                        : [...prev, { id: Date.now(), name: cleanName }]
+                    );
+                  }
+                  setCategoryDraft({ name: '', description: '' });
+                  setCategoryModalOpen(false);
+                  notify(`Đã thêm danh mục "${cleanName}" thành công!`);
+                } catch (err: any) {
+                  notify(err?.message || 'Không thể thêm danh mục mới.');
+                } finally {
+                  setCategoryBusy(false);
+                }
+              }}
+              className="mt-4 space-y-4"
+            >
+              <div>
+                <label className="text-xs font-bold text-[#3d5045]">Tên danh mục mới *</label>
+                <input
+                  required
+                  minLength={2}
+                  maxLength={120}
+                  placeholder="Ví dụ: Hải sản tươi, Nấm sạch, Đồ khô, Sữa & Trứng..."
+                  value={categoryDraft.name}
+                  onChange={e => setCategoryDraft(d => ({ ...d, name: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#3d5045]">Mô tả danh mục (tùy chọn)</label>
+                <textarea
+                  rows={2}
+                  maxLength={500}
+                  placeholder="Ghi chú hoặc giới thiệu ngắn về nhóm hàng này..."
+                  value={categoryDraft.description}
+                  onChange={e => setCategoryDraft(d => ({ ...d, description: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                />
+              </div>
+              {categories.length > 0 && (
+                <div>
+                  <span className="block text-[11px] font-semibold text-slate-500 mb-1.5">Danh mục hiện có:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {categories.map(cat => (
+                      <span
+                        key={cat.id}
+                        className="rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[11px] font-semibold text-[#176b52]"
+                      >
+                        {cat.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCategoryModalOpen(false)}
+                  className="rounded-xl border border-[#d2ddd5] px-4 py-2 text-xs font-semibold text-[#5c6e64]"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={categoryBusy}
+                  className="rounded-xl bg-[#176b52] px-5 py-2 text-xs font-bold text-white shadow hover:bg-[#125340] disabled:opacity-50"
+                >
+                  {categoryBusy ? 'Đang lưu…' : 'Thêm danh mục'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Product Request Modal */}
+      {modal === 'request' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex justify-between items-center pb-3 border-b border-[#edf2ee]">
+              <h3 className="font-extrabold text-[#1a2d24] text-base">Gửi yêu cầu tìm nguồn nông sản</h3>
+              <button onClick={() => setModal('')} className="text-slate-400 hover:text-slate-600">
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+            <form
+              onSubmit={async e => {
+                e.preventDefault();
+                if (!requestDraft.name.trim()) return;
+                setRequestBusy(true);
+                try {
+                  const created = await freshflow.createRequest<any>(requestDraft.name.trim(), requestDraft.description.trim());
+                  setRequests(current => [normalizeRequest(created), ...current]);
+                  setRequestDraft({ name: '', description: '' });
+                  setModal('');
+                  notify('Đã gửi yêu cầu mặt hàng thành công!');
+                } catch (err: any) {
+                  notify(err?.message || 'Không thể gửi yêu cầu.');
+                } finally {
+                  setRequestBusy(false);
+                }
+              }}
+              className="mt-4 space-y-4"
+            >
+              <div>
+                <label className="text-xs font-bold text-[#3d5045]">Tên mặt hàng mong muốn *</label>
+                <input
+                  required
+                  minLength={2}
+                  maxLength={180}
+                  placeholder="Ví dụ: Dưa hấu ruột vàng, Măng tây xanh Đà Lạt..."
+                  value={requestDraft.name}
+                  onChange={e => setRequestDraft(d => ({ ...d, name: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#3d5045]">Mô tả chi tiết & Số lượng dự kiến</label>
+                <textarea
+                  rows={3}
+                  maxLength={2000}
+                  placeholder="Nhu cầu 5kg tuần sau, tiêu chuẩn hữu cơ..."
+                  value={requestDraft.description}
+                  onChange={e => setRequestDraft(d => ({ ...d, description: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setModal('')}
+                  className="rounded-xl border border-[#d2ddd5] px-4 py-2 text-xs font-semibold text-[#5c6e64]"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={requestBusy}
+                  className="rounded-xl bg-[#176b52] px-5 py-2 text-xs font-bold text-white shadow hover:bg-[#125340] disabled:opacity-50"
+                >
+                  {requestBusy ? 'Đang gửi…' : 'Gửi yêu cầu'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (

@@ -18,17 +18,18 @@ configure_logging()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    try:
-        init_database()
-    except Exception as e:
-        logging.getLogger("freshflow.api").error(f"Database init warning: {e}")
-
     if settings.environment == "production":
         if settings.jwt_secret in DEVELOPMENT_JWT_SECRETS or settings.jwt_secret.startswith("replace-"):
             raise RuntimeError("JWT_SECRET must be configured in production")
         database_url = make_url(settings.database_url)
         if database_url.get_backend_name() == "sqlite" or database_url.password in {"freshflow", "replace-with-a-local-mysql-password"}:
             raise RuntimeError("Production requires MySQL and a non-development database password")
+
+    if settings.environment != "test":
+        try:
+            init_database()
+        except Exception as e:
+            logging.getLogger("freshflow.api").error(f"Database init warning: {e}")
     yield
 
 

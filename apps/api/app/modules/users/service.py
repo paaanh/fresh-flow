@@ -50,6 +50,8 @@ def update_profile(payload: ProfileUpdateIn, db: Session, user: User) -> User:
         fields["phone"] = fields["phone"].strip() or None
 
     for key, value in fields.items():
+        if value is None and key in {"shop_address", "shop_description", "vehicle_info"}:
+            value = ""
         setattr(user, key, value.strip() if isinstance(value, str) else value)
     try:
         db.commit()

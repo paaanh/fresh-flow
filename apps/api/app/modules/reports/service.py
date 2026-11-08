@@ -13,31 +13,43 @@ def get_dashboard_summary(
     db: Session,
     shop_id: int | None = None,
     days: int = 30,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> FinancialSummaryOut:
     now = datetime.now(timezone.utc)
-    since = now - timedelta(days=days)
+    if date_from and date_to:
+        query = select(Order).where(Order.created_at >= date_from, Order.created_at <= date_to)
+    else:
+        since = now - timedelta(days=days)
+        query = select(Order).where(Order.created_at >= since)
 
-    query = select(Order).where(Order.created_at >= since)
     if shop_id:
         query = query.where(Order.shop_id == shop_id)
 
     orders = db.scalars(query).all()
 
-    total_users = db.scalar(select(func.count(User.id)).where(User.role == "CUSTOMER")) or 0
-    total_shops = db.scalar(select(func.count(User.id)).where(User.role == "SHOP")) or 0
-    total_products = db.scalar(select(func.count(Product.id)).where(Product.is_active == True)) or 0
+    if shop_id:
+        total_users = 0
+        total_shops = 1
+        total_products = db.scalar(select(func.count(Product.id)).where(Product.is_active == True, Product.shop_id == shop_id)) or 0
+    else:
+        total_users = db.scalar(select(func.count(User.id)).where(User.role == "CUSTOMER")) or 0
+        total_shops = db.scalar(select(func.count(User.id)).where(User.role == "SHOP")) or 0
+        total_products = db.scalar(select(func.count(Product.id)).where(Product.is_active == True)) or 0
+
     total_orders = len(orders)
 
     completed_orders = [o for o in orders if o.status == "COMPLETED"]
     delivery_success_rate = round((len(completed_orders) / total_orders * 100), 1) if total_orders > 0 else 100.0
 
+    valid_orders = [o for o in orders if o.status not in {"CANCELLED", "REJECTED"}]
     total_revenue = sum((o.total for o in completed_orders), Decimal("0"))
-    total_subtotal = sum((o.subtotal for o in orders), Decimal("0"))
-    total_vat = sum((o.vat_amount for o in orders), Decimal("0"))
-    total_delivery_fee = sum((o.delivery_fee for o in orders), Decimal("0"))
-    total_paid = sum((o.paid_amount for o in orders), Decimal("0"))
-    total_debt = sum((o.debt_amount for o in orders), Decimal("0"))
-    total_collected_by_shipper = sum((o.cash_collected_by_shipper for o in orders), Decimal("0"))
+    total_subtotal = sum((o.subtotal for o in valid_orders), Decimal("0"))
+    total_vat = sum((o.vat_amount for o in valid_orders), Decimal("0"))
+    total_delivery_fee = sum((o.delivery_fee for o in valid_orders), Decimal("0"))
+    total_paid = sum((o.paid_amount for o in valid_orders), Decimal("0"))
+    total_debt = sum((o.debt_amount for o in valid_orders), Decimal("0"))
+    total_collected_by_shipper = sum((o.cash_collected_by_shipper for o in valid_orders), Decimal("0"))
 
     # Status distribution
     status_distribution: dict[str, int] = {}
@@ -61,20 +73,32 @@ def get_dashboard_summary(
 
     # Shop breakdown
     shop_dict: dict[int, dict] = {}
-    shops = db.scalars(select(User).where(User.role == "SHOP")).all()
-    for s in shops:
-        shop_dict[s.id] = {
-            "shop_id": s.id,
-            "shop_name": s.shop_name or s.full_name,
-            "total_orders": 0,
-            "revenue": 0,
-        }
+    if shop_id:
+        s = db.get(User, shop_id)
+        if s:
+            shop_dict[s.id] = {
+                "shop_id": s.id,
+                "shop_name": s.shop_name or s.full_name,
+                "total_orders": 0,
+                "revenue": 0,
+            }
+    else:
+        shops = db.scalars(select(User).where(User.role == "SHOP")).all()
+        for s in shops:
+            shop_dict[s.id] = {
+                "shop_id": s.id,
+                "shop_name": s.shop_name or s.full_name,
+                "total_orders": 0,
+                "revenue": 0,
+            }
 
     for o in orders:
         if o.shop_id and o.shop_id in shop_dict:
             shop_dict[o.shop_id]["total_orders"] += 1
             if o.status == "COMPLETED":
                 shop_dict[o.shop_id]["revenue"] += float(o.total)
+
+    shop_breakdown = list(shop_dict.values())
 
     # Customer group breakdown
     group_dict: dict[str, dict] = {}
@@ -119,13 +143,15 @@ def export_orders_csv(db: Session, shop_id: int | None = None) -> Response:
     ]
     for o in orders:
         cust = db.get(User, o.user_id)
-        cust_name = cust.full_name if cust else ""
+        cust_name = (cust.full_name if cust else "").replace('"', '""')
+        phone = (o.recipient_phone or "").replace('"', '""')
+        addr = (o.delivery_address or "").replace('"', '""').replace('\n', ' ')
         date_str = o.created_at.strftime("%Y-%m-%d %H:%M:%S")
         lines.append(
-            f'"{o.order_number}","{cust_name}","{o.recipient_phone}","{o.delivery_address}","{o.delivery_type}","{o.status}",{o.subtotal},{o.vat_amount},{o.delivery_fee},{o.total},{o.paid_amount},{o.debt_amount},"{o.payment_status}","{date_str}"'
+            f'"{o.order_number}","{cust_name}","{phone}","{addr}","{o.delivery_type}","{o.status}",{o.subtotal},{o.vat_amount},{o.delivery_fee},{o.total},{o.paid_amount},{o.debt_amount},"{o.payment_status}","{date_str}"'
         )
 
-    content = "\ufeff" + "\n".join(lines)  # UTF-8 BOM for Excel in Vietnam
+    content = "\n".join(lines)
     return Response(
         content=content.encode("utf-8-sig"),
         media_type="text/csv; charset=utf-8",

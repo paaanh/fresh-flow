@@ -3,11 +3,13 @@ import argparse
 from sqlalchemy import select
 
 from app.db import SessionLocal
+from app.db.init_db import init_database
 from app.models import User
 from app.core.security import hash_password
 
 
 def main():
+    init_database()
     parser = argparse.ArgumentParser(description="Create/update a FreshFlow admin account")
     parser.add_argument("--email", required=True)
     parser.add_argument("--name", default="FreshFlow Admin")

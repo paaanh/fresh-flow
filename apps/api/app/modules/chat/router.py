@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, or_, and_, desc
 
 from app.api.deps import get_db, get_current_user
-from app.models import ChatMessage, User, Order
+from app.models import ChatMessage, User, Order, ModerationTerm, ModerationViolation
 from app.schemas import ChatMessageIn, ChatMessageOut
 from app.realtime import event, manager
 
@@ -92,6 +92,44 @@ def get_conversations(
     return list(contacts.values())
 
 
+@router.get("/users")
+def get_chat_available_users(
+    query: str | None = Query(default=None),
+    role: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(User).where(User.id != user.id, User.is_active == True)
+    if user.role == "CUSTOMER":
+        stmt = stmt.where(User.role.in_(["SHOP", "ADMIN"]))
+
+    if role:
+        stmt = stmt.where(User.role == role)
+    if query:
+        search_pattern = f"%{query}%"
+        stmt = stmt.where(
+            or_(
+                User.full_name.ilike(search_pattern),
+                User.shop_name.ilike(search_pattern),
+                User.email.ilike(search_pattern),
+                User.phone.ilike(search_pattern),
+            )
+        )
+    users = db.scalars(stmt.order_by(User.full_name.asc()).limit(50)).all()
+    return [
+        {
+            "id": u.id,
+            "full_name": u.full_name,
+            "shop_name": u.shop_name,
+            "role": u.role,
+            "email": u.email,
+            "phone": u.phone,
+            "avatar_url": u.avatar_url,
+        }
+        for u in users
+    ]
+
+
 @router.get("/messages", response_model=list[ChatMessageOut])
 def get_chat_messages(
     peer_id: int | None = Query(default=None),
@@ -102,6 +140,10 @@ def get_chat_messages(
     query = select(ChatMessage)
 
     if order_id:
+        if user.role != "ADMIN":
+            order = db.get(Order, order_id)
+            if not order or (user.id not in {order.user_id, order.shop_id, order.shipper_id}):
+                raise HTTPException(status_code=403, detail="Không có quyền truy cập tin nhắn của đơn hàng này")
         query = query.where(ChatMessage.order_id == order_id)
     elif peer_id:
         query = query.where(
@@ -130,16 +172,33 @@ async def send_chat_message(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    active_terms = db.scalars(select(ModerationTerm.term).where(ModerationTerm.is_active == True)).all()
+    for term in active_terms:
+        if term and term.lower() in payload.content.lower():
+            violation = ModerationViolation(user_id=user.id, matched_term=term)
+            db.add(violation)
+            db.commit()
+            raise HTTPException(status_code=400, detail=f"Nội dung chứa từ khóa vi phạm tiêu chuẩn cộng đồng: {term}")
+
     receiver_id = payload.receiver_id
 
     # If receiver not specified but order_id is, deduce receiver
-    if not receiver_id and payload.order_id:
+    if payload.order_id:
         order = db.get(Order, payload.order_id)
-        if order:
+        if not order:
+            raise HTTPException(status_code=404, detail="Đơn hàng không tồn tại")
+        if user.role != "ADMIN" and user.id not in {order.user_id, order.shop_id, order.shipper_id}:
+            raise HTTPException(status_code=403, detail="Không có quyền gửi tin nhắn cho đơn hàng này")
+        if not receiver_id:
             if user.id == order.user_id:
                 receiver_id = order.shop_id or order.shipper_id
-            else:
+            elif user.id == order.shop_id:
                 receiver_id = order.user_id
+            elif user.id == order.shipper_id:
+                receiver_id = order.user_id
+
+    if receiver_id and not db.get(User, receiver_id):
+        raise HTTPException(status_code=404, detail="Người nhận không tồn tại")
 
     if not receiver_id:
         # Default to an admin or shop

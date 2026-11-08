@@ -1,4 +1,4 @@
-﻿from app.core.audit import write_audit
+from app.core.audit import write_audit
 from app.modules.inventory import repository
 from app.schemas import BatchIn
 from decimal import Decimal
@@ -12,10 +12,8 @@ def _owned_product(db: Session, product_id: int, operator: User) -> Product:
     product = db.get(Product, product_id)
     if not product:
         raise HTTPException(404, 'Không tìm thấy sản phẩm')
-    if operator.role == 'SHOP' and product.shop_id not in (None, operator.id):
-        raise HTTPException(403, 'Bạn không có quyền quản lý tồn kho của Shop khác')
-    if operator.role == 'SHOP' and product.shop_id is None:
-        product.shop_id = operator.id
+    if operator.role == 'SHOP' and product.shop_id != operator.id:
+        raise HTTPException(403, 'Bạn không có quyền quản lý tồn kho của sản phẩm này')
     return product
 
 
@@ -45,7 +43,9 @@ async def create_batch(db: Session, product_id: int, payload: BatchIn, admin: Us
     return batch
 
 
-def list_batches(db: Session, product_id: int):
+def list_batches(db: Session, product_id: int, operator: User | None = None):
+    if operator:
+        _owned_product(db, product_id, operator)
     return repository.list_for_product(db, product_id)
 
 

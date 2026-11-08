@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class ORMModel(BaseModel):
@@ -50,6 +50,11 @@ class UserOut(ORMModel):
     avatar_url: str | None = None
     vehicle_info: str | None = ""
 
+    @field_validator("shop_description", "shop_address", "vehicle_info", mode="before")
+    @classmethod
+    def normalize_user_str(cls, v):
+        return "" if v is None else v
+
 
 class CustomerGroupIn(BaseModel):
     code: str = Field(min_length=2, max_length=50)
@@ -63,9 +68,14 @@ class CustomerGroupOut(ORMModel):
     id: int
     code: str
     name: str
-    description: str
+    description: str = ""
     discount_percent: Decimal
     is_active: bool
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_description(cls, v):
+        return "" if v is None else v
 
 
 class CategoryIn(BaseModel):
@@ -82,6 +92,11 @@ class CategoryOut(ORMModel):
     description: str = ""
     icon: str = ""
     is_active: bool
+
+    @field_validator("description", "icon", mode="before")
+    @classmethod
+    def normalize_str(cls, v):
+        return "" if v is None else v
 
 
 class ProductIn(BaseModel):
@@ -118,7 +133,7 @@ class CatalogBatchOut(BaseModel):
 class ProductOut(BaseModel):
     id: int
     name: str
-    description: str
+    description: str = ""
     category_id: int | None
     unit: str
     image_url: str | None
@@ -131,6 +146,11 @@ class ProductOut(BaseModel):
     shop_name: str | None = None
     available_quantity: Decimal = Decimal("0")
     batches: list[CatalogBatchOut] = Field(default_factory=list)
+
+    @field_validator("description", "images", "attached_services", mode="before")
+    @classmethod
+    def normalize_product_str(cls, v):
+        return "" if v is None else v
 
 
 class BatchIn(BaseModel):
@@ -270,6 +290,12 @@ class NotificationOut(ORMModel):
     created_at: datetime
 
 
+class BroadcastNotificationIn(BaseModel):
+    title: str = Field(min_length=2, max_length=160)
+    body: str = Field(min_length=2, max_length=2000)
+    target_role: str | None = Field(default=None)
+
+
 class VatConfigIn(BaseModel):
     tax_name: str = "VAT"
     rate: Decimal = Field(ge=0, le=1)  # 0.08 = 8%
@@ -308,7 +334,7 @@ class PostOut(BaseModel):
     author_name: str | None = None
     shop_name: str | None = None
     title: str
-    content: str
+    content: str = ""
     post_type: str
     product_id: int | None = None
     product_name: str | None = None
@@ -324,6 +350,11 @@ class PostOut(BaseModel):
     delivery_time_text: str = ""
     is_active: bool
     created_at: datetime
+
+    @field_validator("content", "image_urls", "group_prices", "delivery_time_text", mode="before")
+    @classmethod
+    def normalize_post_str(cls, v):
+        return "" if v is None else v
 
 
 class ProductReviewIn(BaseModel):
@@ -341,11 +372,16 @@ class ProductReviewOut(ORMModel):
     user_name: str | None = None
     order_id: int | None
     rating: int
-    comment: str
-    images: str
-    shop_reply: str
+    comment: str = ""
+    images: str = ""
+    shop_reply: str = ""
     is_hidden: bool
     created_at: datetime
+
+    @field_validator("comment", "images", "shop_reply", mode="before")
+    @classmethod
+    def normalize_review_str(cls, v):
+        return "" if v is None else v
 
 
 class ReviewReplyIn(BaseModel):
@@ -368,8 +404,13 @@ class ShipperReviewOut(ORMModel):
     rating: int
     attitude_rating: int
     speed_rating: int
-    comment: str
+    comment: str = ""
     created_at: datetime
+
+    @field_validator("comment", mode="before")
+    @classmethod
+    def normalize_shipper_comment(cls, v):
+        return "" if v is None else v
 
 
 class ChatMessageIn(BaseModel):
@@ -386,10 +427,15 @@ class ChatMessageOut(ORMModel):
     sender_role: str | None = None
     receiver_id: int | None
     order_id: int | None
-    content: str
+    content: str = ""
     image_url: str | None
     is_read: bool
     created_at: datetime
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def normalize_chat_content(cls, v):
+        return "" if v is None else v
 
 
 class FinancialSummaryOut(BaseModel):

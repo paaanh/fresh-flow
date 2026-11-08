@@ -175,6 +175,16 @@ export type Conversation = {
   order_id?: number | null;
 };
 
+export type ChatUser = {
+  id: number;
+  full_name: string;
+  shop_name?: string | null;
+  role: UserRole;
+  email: string;
+  phone?: string | null;
+  avatar_url?: string | null;
+};
+
 export type FinancialSummary = {
   total_users: number;
   total_shops: number;

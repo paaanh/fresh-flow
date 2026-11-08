@@ -15,10 +15,22 @@ from app.modules.pricing.service import unit_price as get_unit_price
 from app.realtime import event, manager
 
 
-def get_current_vat_rate(db: Session) -> Decimal:
-    vat = db.scalar(select(VatConfig).where(VatConfig.is_active == True).order_by(VatConfig.id.desc()))
-    if vat:
-        return vat.rate
+def get_current_vat_rate(db: Session, category_id: int | None = None) -> Decimal:
+    if category_id:
+        vat = db.scalar(
+            select(VatConfig)
+            .where(VatConfig.is_active == True, VatConfig.category_id == category_id)
+            .order_by(VatConfig.id.desc())
+        )
+        if vat:
+            return vat.rate
+    global_vat = db.scalar(
+        select(VatConfig)
+        .where(VatConfig.is_active == True, VatConfig.category_id.is_(None))
+        .order_by(VatConfig.id.desc())
+    )
+    if global_vat:
+        return global_vat.rate
     return Decimal("0.0800")
 
 
@@ -45,6 +57,16 @@ async def create_order(db: Session, payload: OrderCreateIn, user: User) -> Order
     if len(by_id) != len(batch_ids):
         raise HTTPException(404, "Không tìm thấy đợt hàng")
 
+    demands_per_batch: dict[int, Decimal] = {}
+    for line in payload.items:
+        demands_per_batch[line.batch_id] = demands_per_batch.get(line.batch_id, Decimal("0")) + line.quantity
+
+    for b_id, req_qty in demands_per_batch.items():
+        b = by_id[b_id]
+        if req_qty > b.available_quantity:
+            prod = repository.get_product(db, b.product_id)
+            raise HTTPException(409, f"Không đủ hàng cho {prod.name if prod else 'sản phẩm'}")
+
     line_items = []
     subtotal = Decimal("0")
     detected_shop_id = None
@@ -55,9 +77,6 @@ async def create_order(db: Session, payload: OrderCreateIn, user: User) -> Order
 
         if not batch.is_open or not product or not product.is_active:
             raise HTTPException(409, "Sản phẩm hoặc đợt hàng đã đóng")
-
-        if line.quantity > batch.available_quantity:
-            raise HTTPException(409, f"Không đủ hàng cho {product.name}")
 
         if product.shop_id and not detected_shop_id:
             detected_shop_id = product.shop_id
@@ -163,16 +182,25 @@ async def create_order(db: Session, payload: OrderCreateIn, user: User) -> Order
     return order
 
 
+def check_order_access(order: Order, user: User):
+    if user.role == "ADMIN":
+        return
+    if user.role == "CUSTOMER" and order.user_id != user.id:
+        raise HTTPException(403, "Bạn không có quyền xem đơn hàng này")
+    if user.role == "SHOP":
+        if order.shop_id is not None and order.shop_id != user.id:
+            raise HTTPException(403, "Đơn hàng này thuộc về Shop khác")
+    if user.role == "SHIPPER":
+        if order.shipper_id != user.id and not (order.shipper_id is None and order.status == "READY_FOR_PICKUP"):
+            raise HTTPException(403, "Bạn không có quyền xem đơn hàng này")
+
+
 def get_order_for_user(db: Session, order_id: int, user: User) -> Order:
     order = repository.get_order(db, order_id)
     if not order:
         raise HTTPException(404, "Không tìm thấy đơn hàng")
 
-    if user.role == "CUSTOMER" and order.user_id != user.id:
-        raise HTTPException(403, "Bạn không có quyền xem đơn hàng này")
-    if user.role == "SHOP" and order.shop_id and order.shop_id != user.id:
-        raise HTTPException(403, "Đơn hàng này thuộc về Shop khác")
-
+    check_order_access(order, user)
     repository.enrich_order_names(db, order)
     return order
 
@@ -194,9 +222,8 @@ def order_history_for_user(db: Session, order_id: int, user: User):
     order = repository.get_order(db, order_id)
     if not order:
         raise HTTPException(404, "Không tìm thấy đơn hàng")
-    if user.role == "CUSTOMER" and order.user_id != user.id:
-        raise HTTPException(403, "Không có quyền xem lịch sử đơn này")
 
+    check_order_access(order, user)
     return repository.get_order_history(db, order_id)
 
 
@@ -213,12 +240,15 @@ async def change_order_status(
         new_status = "CONFIRMED"
 
     if operator.role == "SHOP":
-        if order.shop_id != operator.id:
+        if order.shop_id is not None and order.shop_id != operator.id:
             raise HTTPException(403, "Bạn không có quyền cập nhật đơn hàng của Shop khác")
+        if order.shop_id is None:
+            order.shop_id = operator.id
         allowed = {
             "PENDING": {"CONFIRMED", "CANCELLED"},
             "CONFIRMED": {"PREPARING", "CANCELLED"},
-            "PREPARING": {"CANCELLED"},
+            "PREPARING": {"READY_FOR_PICKUP", "CANCELLED"},
+            "READY_FOR_PICKUP": {"CANCELLED"},
         }
         if new_status not in allowed.get(old_status, set()):
             raise HTTPException(409, "Trạng thái đơn hàng không thể được Shop cập nhật theo bước này")
@@ -235,24 +265,25 @@ async def change_order_status(
     if old_status in {"CANCELLED", "REJECTED"} and new_status != old_status:
         raise HTTPException(409, "Đơn hàng đã hủy hoặc bị từ chối, không thể đổi trạng thái")
 
+    RESERVED_STATUSES = {"CONFIRMED", "PREPARING", "READY_FOR_PICKUP", "PICKED_UP", "DELIVERING", "COMPLETED"}
+
     # Inventory quantity management
-    if old_status == "PENDING" and new_status in {"CONFIRMED", "PREPARING"}:
+    if old_status == "PENDING" and new_status in RESERVED_STATUSES:
         demand: dict[int, Decimal] = {}
         for item in order.items:
             demand[item.batch_id] = demand.get(item.batch_id, Decimal("0")) + item.quantity
         inventory_service.approve_quantities(db, demand)
 
-    if new_status in {"CANCELLED", "REJECTED"} and old_status in {
-        "CONFIRMED", "PREPARING", "READY_FOR_PICKUP", "PICKED_UP", "DELIVERING"
-    }:
+    if new_status in {"CANCELLED", "REJECTED"} and old_status in RESERVED_STATUSES:
         demand: dict[int, Decimal] = {}
         for item in order.items:
             demand[item.batch_id] = demand.get(item.batch_id, Decimal("0")) + item.quantity
         inventory_service.release_quantities(db, demand)
+        order.debt_amount = Decimal("0")
 
     # When completed, ensure payment status is updated if it was COD
     if new_status == "COMPLETED":
-        if order.payment_status in {"UNPAID", "DEBT"}:
+        if order.payment_method == "COD" and order.payment_status in {"UNPAID", "DEBT"}:
             order.paid_amount = order.total
             order.debt_amount = Decimal("0")
             order.payment_status = "PAID"
@@ -350,8 +381,11 @@ async def assign_shipper_to_order(
     if not order:
         raise HTTPException(404, "Không tìm thấy đơn hàng")
 
-    if operator.role == "SHOP" and order.shop_id != operator.id:
-        raise HTTPException(403, "Bạn không có quyền phân công đơn hàng của Shop khác")
+    if operator.role == "SHOP":
+        if order.shop_id is not None and order.shop_id != operator.id:
+            raise HTTPException(403, "Bạn không có quyền phân công đơn hàng của Shop khác")
+        if order.shop_id is None:
+            order.shop_id = operator.id
     if operator.role == "SHIPPER":
         raise HTTPException(403, "Shipper không thể tự phân công đơn hàng")
 

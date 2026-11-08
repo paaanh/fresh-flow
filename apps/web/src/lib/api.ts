@@ -126,7 +126,7 @@ export const freshflow = {
 
   // Categories & Products
   categories: <T>() => api.get<T[]>('/categories'),
-  createCategory: <T>(name: string) => api.post<T>('/admin/categories', { name }),
+  createCategory: <T>(name: string, description?: string) => api.post<T>('/admin/categories', description ? { name, description } : { name }),
   products: <T>(category_id?: number, shop_id?: number) => api.get<T[]>(`/products${query({ category_id, shop_id })}`),
   catalog: <T>(category_id?: number, shop_id?: number) => api.get<T[]>(`/catalog/me${query({ category_id, shop_id })}`),
   createProduct: <T>(body: ProductIn) => api.post<T>('/admin/products', body),
@@ -164,7 +164,8 @@ export const freshflow = {
   deletePost: (id: number) => api.delete<void>(`/posts/${id}`),
 
   // VAT configs
-  vatConfigs: <T>() => api.get<T[]>('/admin/vat'),
+  vatConfigs: <T>() => api.get<T[]>('/vat/configs').catch(() => api.get<T[]>('/admin/vat')),
+  adminVatConfigs: <T>() => api.get<T[]>('/admin/vat'),
   vatHistory: <T>() => api.get<T[]>('/admin/vat/history'),
   updateVatConfig: <T>(id: number, body: { tax_name: string; rate: number; category_id?: number | null; note?: string }) => api.put<T>(`/admin/vat/${id}`, body),
 
@@ -184,6 +185,7 @@ export const freshflow = {
 
   // Chat Realtime
   chatConversations: <T>() => api.get<T[]>('/chat/conversations'),
+  chatUsers: <T>(search?: string, role?: string) => api.get<T[]>(`/chat/users${query({ query: search, role })}`),
   chatMessages: <T>(peer_id?: number, order_id?: number) => api.get<T[]>(`/chat/messages${query({ peer_id, order_id })}`),
   sendChatMessage: <T>(body: { receiver_id?: number | null; order_id?: number | null; content: string; image_url?: string | null }) => api.post<T>('/chat/messages', body),
 
@@ -193,6 +195,7 @@ export const freshflow = {
   respondRequest: <T>(id: number, body: { status: 'QUOTED' | 'ACCEPTED' | 'REJECTED' | 'FULFILLED'; admin_response?: string; quoted_price?: number }) => api.patch<T>(`/admin/product-requests/${id}`, body),
   notifications: <T>() => api.get<T[]>('/notifications'),
   readNotification: (id: number) => api.patch<void>(`/notifications/${id}/read`, undefined),
+  broadcastNotification: <T>(body: { title: string; body: string; target_role?: string | null }) => api.post<T>('/admin/notifications/broadcast', body),
   addModerationTerm: <T>(term: string) => api.post<T>(`/admin/moderation/terms${query({ term })}`),
 
   // Financial Dashboard Reports

@@ -450,3 +450,20 @@ inventory_batches 1--N order_items
 | `image_url` | VARCHAR(500) | NULL |
 | `is_read` | BOOLEAN | NOT NULL, mặc định `false` |
 | `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
+
+
+### 5.5. Bảng Nhóm khách hàng
+
+#### `customer_groups`
+| Cột | Kiểu | Ràng buộc / mặc định |
+|---|---|---|
+| `id` | INTEGER | PK |
+| `code` | VARCHAR(50) | NOT NULL, UQ, index |
+| `name` | VARCHAR(100) | NOT NULL |
+| `description` | TEXT | NULL |
+| `discount_percent` | NUMERIC(5, 2) | NOT NULL, mặc định `0.00` |
+| `is_active` | BOOLEAN | NOT NULL, mặc định `true` |
+
+---
+
+> Chi tiết danh sách đầy đủ tất cả bảng, cột mới và toàn bộ API Endpoints mới đã được tổng hợp riêng tại tài liệu: [docs/upgrade-api-and-db.md](file:///c:/Users/LEGION/Downloads/FreshFlow/docs/upgrade-api-and-db.md)

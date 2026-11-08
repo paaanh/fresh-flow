@@ -12,13 +12,12 @@ router = APIRouter(tags=["Reports & Analytics"])
 
 @router.get("/admin/reports/summary")
 def report_summary(
-    date_from: datetime,
-    date_to: datetime,
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    # Backward compatibility with existing summary endpoint
-    return service.get_dashboard_summary(db=db, days=30)
+    return service.get_dashboard_summary(db=db, date_from=date_from, date_to=date_to)
 
 
 @router.get("/admin/reports/dashboard", response_model=FinancialSummaryOut)

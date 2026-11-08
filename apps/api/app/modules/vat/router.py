@@ -9,6 +9,12 @@ from app.models import VatConfig, VatHistory, User
 from app.schemas import VatConfigIn, VatConfigOut
 
 router = APIRouter(prefix="/admin/vat", tags=["Admin VAT Management"])
+active_vat_router = APIRouter(prefix="/vat", tags=["VAT"])
+
+
+@active_vat_router.get("/configs", response_model=list[VatConfigOut])
+def list_active_vat_configs(db: Session = Depends(get_db)):
+    return db.scalars(select(VatConfig).where(VatConfig.is_active == True).order_by(VatConfig.id.asc())).all()
 
 
 @router.get("", response_model=list[VatConfigOut])

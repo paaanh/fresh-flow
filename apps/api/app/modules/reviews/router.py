@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, and_
 
 from app.api.deps import get_db, get_current_user, require_admin, require_shop
-from app.models import ProductReview, ShipperReview, Order, OrderItem, Product, User
+from app.models import ProductReview, ShipperReview, Order, OrderItem, Product, User, ModerationTerm, ModerationViolation
 from app.schemas import (
     ProductReviewIn,
     ProductReviewOut,
@@ -60,6 +60,25 @@ def create_product_review(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    prod = db.get(Product, product_id)
+    if not prod:
+        raise HTTPException(404, "Không tìm thấy sản phẩm")
+
+    if payload.order_id:
+        ord = db.get(Order, payload.order_id)
+        if not ord:
+            payload.order_id = None
+        else:
+            existing = db.scalar(
+                select(ProductReview).where(
+                    ProductReview.order_id == payload.order_id,
+                    ProductReview.product_id == product_id,
+                    ProductReview.user_id == user.id,
+                )
+            )
+            if existing:
+                raise HTTPException(409, "Bạn đã đánh giá sản phẩm này trong đơn hàng rồi")
+
     # Verify user has purchased this product in a completed order
     has_purchased = db.scalar(
         select(OrderItem.id)
@@ -100,7 +119,7 @@ def reply_to_review(
         raise HTTPException(404, "Không tìm thấy đánh giá")
 
     product = db.get(Product, rev.product_id)
-    if product and product.shop_id != user.id:
+    if user.role != "ADMIN" and product and product.shop_id != user.id:
         raise HTTPException(403, "Bạn không có quyền trả lời đánh giá của Shop khác")
 
     rev.shop_reply = payload.reply
@@ -123,6 +142,17 @@ def review_shipper(
         raise HTTPException(403, "Bạn không phải chủ đơn hàng này")
     if not order.shipper_id:
         raise HTTPException(400, "Đơn hàng chưa có Shipper")
+    if order.status != "COMPLETED":
+        raise HTTPException(400, "Chỉ có thể đánh giá Shipper sau khi đơn hàng đã hoàn thành")
+
+    existing = db.scalar(
+        select(ShipperReview).where(
+            ShipperReview.order_id == order.id,
+            ShipperReview.user_id == user.id,
+        )
+    )
+    if existing:
+        raise HTTPException(409, "Bạn đã đánh giá Shipper cho đơn hàng này rồi")
 
     rev = ShipperReview(
         shipper_id=order.shipper_id,

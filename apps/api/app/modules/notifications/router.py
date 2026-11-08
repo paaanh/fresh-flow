@@ -1,11 +1,8 @@
-from fastapi import APIRouter
-from fastapi import Depends
-from app.schemas import NotificationOut
+from fastapi import APIRouter, Depends
+from app.schemas import NotificationOut, BroadcastNotificationIn
 from sqlalchemy.orm import Session
 from app.models import User
-from app.core.security import get_current_user
-from app.db import get_db
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, require_admin
 from app.modules.notifications import service
 
 router = APIRouter()
@@ -17,3 +14,11 @@ def list_notifications(db: Session=Depends(get_db), user: User=Depends(get_curre
 @router.patch('/notifications/{notification_id}/read', status_code=204)
 def mark_notification_read(notification_id: int, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
     return service.mark_notification_read(notification_id=notification_id, db=db, user=user)
+
+@router.post('/admin/notifications/broadcast', status_code=201)
+async def broadcast_notification(
+    payload: BroadcastNotificationIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return await service.broadcast_notification(payload=payload, db=db, admin=admin)

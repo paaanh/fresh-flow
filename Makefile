@@ -10,7 +10,7 @@ logs:
 	docker compose logs -f
 
 api-test:
-	python -m pytest apps/api/app/tests
+	python -m pytest -o pythonpath=apps/api apps/api/app/tests
 
 web-typecheck:
 	cd apps/web && npm run typecheck

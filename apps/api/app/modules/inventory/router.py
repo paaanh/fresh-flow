@@ -15,8 +15,8 @@ async def create_batch(product_id: int, payload: BatchIn, db: Session = Depends(
 
 
 @router.get("/admin/products/{product_id}/batches")
-def list_batches(product_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return service.list_batches(db, product_id)
+def list_batches(product_id: int, db: Session = Depends(get_db), operator: User = Depends(require_admin_or_shop)):
+    return service.list_batches(db, product_id, operator)
 
 
 @router.post("/admin/products/{product_id}/adjustments")

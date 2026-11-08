@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.core.security import hash_password, verify_password
 from app.db import SessionLocal
+from app.db.init_db import init_database
 from app.models import (
     Address,
     AuditLog,
@@ -158,6 +159,11 @@ def ensure_order(db, *, number: str, user: User, admin: User, status: str,
     qty = Decimal(quantity)
     price = Decimal(unit_price)
     subtotal = qty * price
+    vat_rate = Decimal("0.0800")
+    vat_amount = (subtotal * vat_rate).quantize(Decimal("0.01"))
+    total = subtotal + vat_amount + slot.fee
+    paid_amount = total if status == "COMPLETED" else Decimal("0.00")
+    payment_status = "PAID" if status == "COMPLETED" else "UNPAID"
     order = Order(
         order_number=number,
         user_id=user.id,
@@ -166,7 +172,14 @@ def ensure_order(db, *, number: str, user: User, admin: User, status: str,
         delivery_address=address,
         delivery_fee=slot.fee,
         subtotal=subtotal,
-        total=subtotal + slot.fee,
+        vat_rate=vat_rate,
+        vat_amount=vat_amount,
+        total=total,
+        paid_amount=paid_amount,
+        debt_amount=Decimal("0.00"),
+        payment_status=payment_status,
+        payment_method="COD",
+        cash_collected_by_shipper=paid_amount,
         note="Đơn hàng demo để kiểm tra giao diện và báo cáo.",
         created_at=created_at,
         updated_at=created_at,
@@ -256,6 +269,7 @@ def ensure_audit(db, admin: User, action: str, entity_type: str, entity_id: str,
 
 
 def main() -> None:
+    init_database()
     now = datetime.now(timezone.utc).replace(microsecond=0)
     batch_date = now.replace(hour=0, minute=0, second=0)
     db = SessionLocal()

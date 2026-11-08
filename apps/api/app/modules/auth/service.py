@@ -25,7 +25,7 @@ def register(payload: RegisterIn, db: Session = None):
         email=payload.email.lower(),
         full_name=payload.full_name,
         password_hash=hash_password(payload.password),
-        phone=payload.phone,
+        phone=(payload.phone.strip() if payload.phone and payload.phone.strip() else None),
         role=role,
         customer_group=payload.customer_group or "STUDENT",
         shop_name=f"Shop {payload.full_name}" if role == "SHOP" else None,

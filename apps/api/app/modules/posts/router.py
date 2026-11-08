@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.api.deps import get_db, get_current_user, require_admin_or_shop
-from app.models import Post, Product, User
+from app.models import Post, Product, User, ModerationTerm, ModerationViolation
 from app.schemas import PostIn, PostOut
 
 router = APIRouter(prefix="/posts", tags=["Posts & Newfeed"])
@@ -71,6 +71,8 @@ def list_posts(
         query = query.where(Post.post_type == post_type)
     if shop_id:
         query = query.where(Post.author_id == shop_id)
+    if category_id:
+        query = query.join(Product, Post.product_id == Product.id).where(Product.category_id == category_id)
 
     posts = db.scalars(query).all()
 
@@ -98,12 +100,26 @@ def create_post(
     db: Session = Depends(get_db),
     user: User = Depends(require_admin_or_shop),
 ):
+    active_terms = db.scalars(select(ModerationTerm.term).where(ModerationTerm.is_active == True)).all()
+    for term in active_terms:
+        if term and (term.lower() in payload.title.lower() or term.lower() in payload.content.lower()):
+            violation = ModerationViolation(user_id=user.id, matched_term=term)
+            db.add(violation)
+            db.commit()
+            raise HTTPException(status_code=400, detail=f"Nội dung bài viết chứa từ khóa vi phạm tiêu chuẩn cộng đồng: {term}")
+
+    product_id = payload.product_id
+    if product_id:
+        prod = db.get(Product, product_id)
+        if not prod:
+            product_id = None
+
     post = Post(
         author_id=user.id,
         title=payload.title,
         content=payload.content,
         post_type=payload.post_type,
-        product_id=payload.product_id,
+        product_id=product_id,
         image_urls=payload.image_urls,
         quantity_limit=payload.quantity_limit,
         target_audience=payload.target_audience,

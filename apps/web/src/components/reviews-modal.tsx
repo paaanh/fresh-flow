@@ -26,28 +26,38 @@ export default function ReviewModal({
   const [speedRating, setSpeedRating] = useState<number>(5);
   const [comment, setComment] = useState('');
   const [images, setImages] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (type === 'product') {
-      await onSubmit({
-        product_id: targetId,
-        rating,
-        comment,
-        images,
-      });
-    } else {
-      await onSubmit({
-        order_id: targetId,
-        rating,
-        attitude_rating: attitudeRating,
-        speed_rating: speedRating,
-        comment,
-      });
+    setBusy(true);
+    setError('');
+    try {
+      if (type === 'product') {
+        await onSubmit({
+          product_id: targetId,
+          rating,
+          comment,
+          images,
+        });
+      } else {
+        await onSubmit({
+          order_id: targetId,
+          rating,
+          attitude_rating: attitudeRating,
+          speed_rating: speedRating,
+          comment,
+        });
+      }
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Không gửi được đánh giá.');
+    } finally {
+      setBusy(false);
     }
-    onClose();
   };
 
   return (
@@ -65,17 +75,19 @@ export default function ReviewModal({
           </button>
         </div>
 
+        {error && <div className="mt-3 rounded-lg bg-rose-50 p-2.5 text-xs text-rose-700">{error}</div>}
+
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           {type === 'product' ? (
             <div>
               <label className="text-xs font-bold text-[#3d5045]">Chất lượng sản phẩm</label>
-              <div className="mt-1 flex gap-2 text-2xl text-yellow-400">
+              <div className="mt-1 flex gap-2 text-2xl">
                 {[1, 2, 3, 4, 5].map(s => (
                   <button
                     key={s}
                     type="button"
                     onClick={() => setRating(s)}
-                    className="focus:outline-none transition hover:scale-110"
+                    className={`focus:outline-none transition hover:scale-110 ${s <= rating ? 'text-amber-400' : 'text-slate-300'}`}
                   >
                     ★
                   </button>
@@ -86,11 +98,33 @@ export default function ReviewModal({
           ) : (
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-bold text-[#3d5045]">Thái độ phục vụ của Shipper</label>
-                <div className="flex gap-2 text-xl text-yellow-400">
+                <label className="text-xs font-bold text-[#3d5045]">Đánh giá chung dịch vụ giao hàng</label>
+                <div className="flex gap-2 text-2xl">
                   {[1, 2, 3, 4, 5].map(s => (
-                    <button key={s} type="button" onClick={() => setAttitudeRating(s)}>
-                      {s <= attitudeRating ? '★' : '☆'}
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setRating(s)}
+                      className={`focus:outline-none transition hover:scale-110 ${s <= rating ? 'text-amber-400' : 'text-slate-300'}`}
+                    >
+                      ★
+                    </button>
+                  ))}
+                  <span className="text-xs font-bold text-slate-600 self-center ml-2">{rating}/5 sao</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-[#3d5045]">Thái độ phục vụ của Shipper</label>
+                <div className="flex gap-2 text-xl">
+                  {[1, 2, 3, 4, 5].map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setAttitudeRating(s)}
+                      className={s <= attitudeRating ? 'text-amber-400' : 'text-slate-300'}
+                    >
+                      ★
                     </button>
                   ))}
                   <span className="text-xs text-slate-600 self-center ml-2">{attitudeRating} sao</span>
@@ -99,10 +133,15 @@ export default function ReviewModal({
 
               <div>
                 <label className="text-xs font-bold text-[#3d5045]">Tốc độ & Thời gian giao hàng</label>
-                <div className="flex gap-2 text-xl text-yellow-400">
+                <div className="flex gap-2 text-xl">
                   {[1, 2, 3, 4, 5].map(s => (
-                    <button key={s} type="button" onClick={() => setSpeedRating(s)}>
-                      {s <= speedRating ? '★' : '☆'}
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setSpeedRating(s)}
+                      className={s <= speedRating ? 'text-amber-400' : 'text-slate-300'}
+                    >
+                      ★
                     </button>
                   ))}
                   <span className="text-xs text-slate-600 self-center ml-2">{speedRating} sao</span>
@@ -146,9 +185,10 @@ export default function ReviewModal({
             </button>
             <button
               type="submit"
-              className="rounded-xl bg-[#176b52] px-5 py-2 text-xs font-bold text-white shadow hover:bg-[#125340]"
+              disabled={busy}
+              className="rounded-xl bg-[#176b52] px-5 py-2 text-xs font-bold text-white shadow hover:bg-[#125340] disabled:opacity-50"
             >
-              Gửi đánh giá
+              {busy ? 'Đang gửi…' : 'Gửi đánh giá'}
             </button>
           </div>
         </form>

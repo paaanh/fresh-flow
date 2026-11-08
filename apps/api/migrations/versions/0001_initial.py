@@ -13,6 +13,11 @@ depends_on = None
 
 
 def upgrade():
+    bind = op.get_bind()
+    existing = set(sa.inspect(bind).get_table_names())
+    if 'categories' in existing:
+        return
+
     op.create_table('categories',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(length=100), nullable=False),

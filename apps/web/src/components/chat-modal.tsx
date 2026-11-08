@@ -7,11 +7,14 @@ import {
   faImage,
   faPaperPlane,
   faStore,
+  faTruck,
   faUser,
+  faUserPlus,
   faUserShield,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons';
-import type { ChatMessage, Conversation, User } from '@/types/domain';
+import type { ChatMessage, ChatUser, Conversation, User } from '@/types/domain';
+import ChatUserPicker from '@/components/chat-user-picker';
 
 interface ChatModalProps {
   isOpen: boolean;
@@ -35,6 +38,7 @@ export default function ChatModal({
   onSendMessage,
 }: ChatModalProps) {
   const [inputText, setInputText] = useState('');
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [selectedPeer, setSelectedPeer] = useState<number | undefined>(activePeerId || conversations[0]?.peer_id);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -66,11 +70,19 @@ export default function ChatModal({
       <div className="flex h-[580px] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
         {/* Sidebar Contacts */}
         <div className="w-1/3 border-r border-[#e8ede8] bg-[#f8faf8] flex flex-col">
-          <div className="p-4 border-b border-[#e8ede8]">
-            <h3 className="font-extrabold text-sm text-[#1e2e26] flex items-center gap-2">
+          <div className="p-3.5 border-b border-[#e8ede8] flex items-center justify-between">
+            <h3 className="font-extrabold text-xs text-[#1e2e26] flex items-center gap-1.5">
               <FontAwesomeIcon icon={faComments} className="text-[#176b52]" />
-              Tin nhắn trực tiếp
+              Tin nhắn
             </h3>
+            <button
+              onClick={() => setIsPickerOpen(true)}
+              className="flex items-center gap-1 rounded-lg bg-[#176b52] px-2 py-1 text-[11px] font-bold text-white shadow-sm hover:bg-[#125340]"
+              title="Chọn người nhắn tin"
+            >
+              <FontAwesomeIcon icon={faUserPlus} className="text-[10px]" />
+              <span>Chọn người</span>
+            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-[#edf2ee]">
@@ -184,6 +196,16 @@ export default function ChatModal({
           </form>
         </div>
       </div>
+
+      <ChatUserPicker
+        isOpen={isPickerOpen}
+        onClose={() => setIsPickerOpen(false)}
+        onSelectUser={u => {
+          setSelectedPeer(u.id);
+          onSelectPeer(u.id);
+        }}
+        currentUserRole={currentUser?.role}
+      />
     </div>
   );
 }

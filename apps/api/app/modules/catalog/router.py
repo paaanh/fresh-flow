@@ -40,8 +40,8 @@ def list_categories(db: Session = Depends(get_db)):
 
 
 @router.post("/admin/categories", status_code=201)
-def create_category(payload: CategoryIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    return service.create_category(db, payload.name, admin)
+def create_category(payload: CategoryIn, db: Session = Depends(get_db), admin: User = Depends(require_admin_or_shop)):
+    return service.create_category(db, payload, admin)
 
 
 @router.get("/products", response_model=list[ProductOut])

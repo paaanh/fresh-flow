@@ -256,10 +256,13 @@ def upgrade():
     # categories
     cats = _existing_cols(bind, "categories")
     if "parent_id" not in cats:
-        op.add_column("categories", sa.Column("parent_id", sa.Integer(),
-                      sa.ForeignKey("categories.id"), nullable=True))
+        if bind.dialect.name == "sqlite":
+            op.add_column("categories", sa.Column("parent_id", sa.Integer(), nullable=True))
+        else:
+            op.add_column("categories", sa.Column("parent_id", sa.Integer(),
+                          sa.ForeignKey("categories.id"), nullable=True))
     if "description" not in cats:
-        op.add_column("categories", sa.Column("description", sa.Text(), nullable=True))
+        op.add_column("categories", sa.Column("description", sa.Text(), nullable=True, server_default=""))
     if "icon" not in cats:
         op.add_column("categories", sa.Column("icon", sa.String(100),
                       nullable=False, server_default=""))
@@ -267,13 +270,16 @@ def upgrade():
     # products
     prods = _existing_cols(bind, "products")
     if "shop_id" not in prods:
-        op.add_column("products", sa.Column("shop_id", sa.Integer(),
-                      sa.ForeignKey("users.id"), nullable=True))
+        if bind.dialect.name == "sqlite":
+            op.add_column("products", sa.Column("shop_id", sa.Integer(), nullable=True))
+        else:
+            op.add_column("products", sa.Column("shop_id", sa.Integer(),
+                          sa.ForeignKey("users.id"), nullable=True))
         op.create_index("ix_products_shop_id", "products", ["shop_id"])
     if "images" not in prods:
-        op.add_column("products", sa.Column("images", sa.Text(), nullable=True))
+        op.add_column("products", sa.Column("images", sa.Text(), nullable=True, server_default=""))
     if "attached_services" not in prods:
-        op.add_column("products", sa.Column("attached_services", sa.Text(), nullable=True))
+        op.add_column("products", sa.Column("attached_services", sa.Text(), nullable=True, server_default=""))
 
     # orders — new financial & delivery columns
     ords = _existing_cols(bind, "orders")
@@ -304,8 +310,12 @@ def upgrade():
     # Add FK indexes for orders if columns were just created
     if "shop_id" not in ords:
         op.create_index("ix_orders_shop_id", "orders", ["shop_id"])
+        if bind.dialect.name != "sqlite":
+            op.create_foreign_key("fk_orders_shop_id", "orders", "users", ["shop_id"], ["id"])
     if "shipper_id" not in ords:
         op.create_index("ix_orders_shipper_id", "orders", ["shipper_id"])
+        if bind.dialect.name != "sqlite":
+            op.create_foreign_key("fk_orders_shipper_id", "orders", "users", ["shipper_id"], ["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -316,9 +326,7 @@ def downgrade():
     bind = op.get_bind()
     tables = _existing_tables(bind)
 
-    for tbl in ("audit_logs", "moderation_violations", "moderation_terms",
-                "notifications", "product_requests", "chat_messages",
-                "shipper_reviews", "product_reviews", "posts",
+    for tbl in ("chat_messages", "shipper_reviews", "product_reviews", "posts",
                 "vat_history", "vat_configs", "customer_groups"):
         if tbl in tables:
             op.drop_table(tbl)
