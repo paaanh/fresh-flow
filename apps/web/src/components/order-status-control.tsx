@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-export type UpdateOrderStatus = (id: string, status: string) => void | boolean | Promise<void | boolean>;
+export type UpdateOrderStatus = (id: string, status: string, note?: string) => void | boolean | Promise<void | boolean>;
 
 export default function OrderStatusControl({ id, status, updateStatus }: { id: string; status: string; updateStatus: UpdateOrderStatus }) {
   const [editing, setEditing] = useState(false);
@@ -14,7 +14,7 @@ export default function OrderStatusControl({ id, status, updateStatus }: { id: s
     'Đã xác nhận': ['Đang chuẩn bị', 'Chờ Shipper lấy hàng', 'Đã hủy'],
     'Đã duyệt': ['Đang chuẩn bị', 'Chờ Shipper lấy hàng', 'Đã hủy'],
     'Đang chuẩn bị': ['Chờ Shipper lấy hàng', 'Đang giao', 'Hoàn thành', 'Đã hủy'],
-    'Chờ Shipper lấy hàng': ['Shipper đã lấy hàng', 'Đang giao', 'Đã hủy'],
+    'Chờ Shipper lấy hàng': ['Shipper đã lấy hàng', 'Đang giao', 'Hoàn thành', 'Đã hủy'],
     'Shipper đã lấy hàng': ['Đang giao', 'Đã hủy'],
     'Đang giao': ['Hoàn thành', 'Đã hủy'],
   };

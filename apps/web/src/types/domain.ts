@@ -10,6 +10,8 @@ export type User = {
   role: UserRole;
   customer_group: string;
   is_active: boolean;
+  is_email_verified?: boolean;
+  is_phone_verified?: boolean;
   shop_name?: string | null;
   shop_description?: string;
   shop_address?: string;
@@ -79,6 +81,9 @@ export type ProductRequest = {
   customer: string;
   date: string;
   status: string;
+  description?: string;
+  admin_response?: string;
+  quoted_price?: number | null;
 };
 
 export type Post = {

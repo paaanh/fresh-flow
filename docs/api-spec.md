@@ -1,359 +1,197 @@
-# FreshFlow - API và cấu trúc database
+# FreshFlow - Đặc tả API (API Specification)
 
-Tài liệu này được tổng hợp từ mã nguồn backend hiện tại.
+Tài liệu đặc tả toàn bộ API REST và WebSocket của nền tảng FreshFlow.
 
-- **API framework:** FastAPI
-- **REST base path:** `/api/v1`
-- **Swagger/OpenAPI:** `/docs`
-- **Database local mặc định:** SQLite (`freshflow.db`)
-- **Database production:** MySQL 8
-- **Xác thực:** Bearer JWT
-- **Quy ước quyền:** `PUBLIC` = không cần đăng nhập, `USER` = cần Bearer token, `ADMIN` = cần Bearer token với role `ADMIN`
+- **Framework:** FastAPI (Python 3.11+)
+- **Base Path:** `/api/v1`
+- **Tài liệu trực quan:** `/docs` (Swagger UI) và `/redoc` (ReDoc)
+- **Database:** SQLite local development (`freshflow.db`) / MySQL 8.x production
+- **Cơ chế xác thực:** Bearer JWT Token
+- **Quy ước phân quyền (RBAC):**
+  - `PUBLIC`: Không yêu cầu đăng nhập.
+  - `USER`: Đã đăng nhập với tài khoản hợp lệ (`CUSTOMER`, `SHOP`, `SHIPPER`, hoặc `ADMIN`).
+  - `CUSTOMER`: Khách hàng mua sắm, nhận hàng và đánh giá.
+  - `SHOP`: Đối tác gian hàng (quản lý sản phẩm, đơn hàng, phản hồi đánh giá của shop).
+  - `SHIPPER`: Tài xế giao vận (nhận đơn, cập nhật lộ trình, thu hộ COD).
+  - `ADMIN`: Quản trị viên hệ thống (toàn quyền quản lý và kiểm duyệt).
 
-## 1. API endpoints
+---
 
-### 1.1. System và authentication
+## 1. Danh sách API Endpoints
 
-| Method | Path | Quyền | Request/query chính | Response |
-|---|---|---|---|---|
-| `GET` | `/` | PUBLIC | — | Tên ứng dụng, link docs và health |
-| `GET` | `/api/v1/health` | PUBLIC | — | Trạng thái kết nối database |
-| `POST` | `/api/v1/auth/register` | PUBLIC | JSON `RegisterIn`: `email`, `full_name`, `password`, `phone?`, `customer_group?` | `UserOut` (201) |
-| `POST` | `/api/v1/auth/login` | PUBLIC | JSON `LoginIn`: `username`, `password` | `TokenOut` |
-| `GET` | `/api/v1/auth/me` | USER | Bearer token | `UserOut` |
+### 1.1. Hệ thống & Xác thực (Authentication & OTP)
 
-`TokenOut` gồm: `access_token`, `token_type` (`bearer`).
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/` | PUBLIC | Thông tin dịch vụ & trạng thái hệ thống | — | JSON tên app, version, link docs |
+| `GET` | `/api/v1/health` | PUBLIC | Kiểm tra tình trạng kết nối DB | — | `{ "status": "ok", "database": "connected" }` |
+| `POST` | `/api/v1/auth/register` | PUBLIC | Đăng ký tài khoản (Khách/Shop/Shipper) | JSON `RegisterIn`: `email`, `full_name`, `password`, `phone?`, `role?`, `customer_group?`, `otp_code?` | `UserOut` (201) |
+| `POST` | `/api/v1/auth/login` | PUBLIC | Đăng nhập hệ thống | JSON `LoginIn`: `username` (email/sđt), `password` | `TokenOut`: `access_token`, `token_type` |
+| `GET` | `/api/v1/auth/me` | USER | Lấy thông tin tài khoản đang đăng nhập | Bearer Token | `UserOut` |
+| `POST` | `/api/v1/auth/request-otp` | PUBLIC | Gửi mã OTP xác thực qua Email/SĐT | JSON `RequestOtpIn`: `target`, `purpose` | `{ "message": "string", "otp_code?": "string" }` |
+| `POST` | `/api/v1/auth/verify-otp` | PUBLIC | Xác thực mã OTP | JSON `VerifyOtpIn`: `target`, `code`, `purpose` | `{ "verified": true, "message": "string" }` |
+| `POST` | `/api/v1/auth/reset-password` | PUBLIC | Đặt lại mật khẩu bằng OTP | JSON `ResetPasswordIn`: `target`, `code`, `new_password` | `{ "message": "Đặt lại mật khẩu thành công" }` |
 
-### 1.2. User và địa chỉ
+---
 
-| Method | Path | Quyền | Request/query chính | Response |
-|---|---|---|---|---|
-| `GET` | `/api/v1/admin/users` | ADMIN | Query `search?` | Danh sách `UserOut` |
-| `PATCH` | `/api/v1/admin/users/{user_id}/status` | ADMIN | Query `is_active: bool` | `UserOut` |
-| `GET` | `/api/v1/addresses` | USER | — | Danh sách địa chỉ |
-| `POST` | `/api/v1/addresses` | USER | JSON `AddressIn` | Địa chỉ (201) |
-| `PATCH` | `/api/v1/addresses/{address_id}` | USER | JSON `AddressIn` | Địa chỉ |
-| `DELETE` | `/api/v1/addresses/{address_id}` | USER | — | Không có nội dung (204) |
+### 1.2. Người dùng, Hồ sơ & Đối tác (Users & Profiles)
 
-`AddressIn` gồm: `label?`, `recipient`, `phone`, `line1`, `ward?`, `district?`, `city`, `is_default?`.
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/admin/users` | ADMIN | Tìm kiếm & danh sách người dùng | Query `search?`, `role?` | Danh sách `UserOut` |
+| `PATCH` | `/api/v1/admin/users/{user_id}/status` | ADMIN | Khóa hoặc kích hoạt người dùng | Query `is_active: bool` | `UserOut` |
+| `PATCH` | `/api/v1/users/profile` | USER | Cập nhật hồ sơ tài khoản / shop / xe | JSON: `full_name?`, `phone?`, `shop_name?`, `shop_description?`, `shop_address?`, `vehicle_info?` | `UserOut` |
+| `GET` | `/api/v1/shops` | PUBLIC | Danh sách các cửa hàng đối tác trên sàn | — | Danh sách `UserOut` (role SHOP) |
+| `GET` | `/api/v1/shippers` | USER | Danh sách tài xế giao hàng | — | Danh sách `UserOut` (role SHIPPER) |
 
-### 1.3. Catalog, sản phẩm và tồn kho
+---
 
-| Method | Path | Quyền | Request/query chính | Response |
-|---|---|---|---|---|
-| `GET` | `/api/v1/categories` | PUBLIC | — | Danh sách category |
-| `POST` | `/api/v1/admin/categories` | ADMIN | JSON `CategoryIn`: `name` | Category (201) |
-| `GET` | `/api/v1/products` | PUBLIC | Query `category_id?` | Danh sách `ProductOut` |
-| `GET` | `/api/v1/catalog/me` | USER | Query `category_id?` | Catalog theo nhóm khách hàng |
-| `POST` | `/api/v1/admin/products` | ADMIN | JSON `ProductIn` | `ProductOut` (201) |
-| `PATCH` | `/api/v1/admin/products/{product_id}` | ADMIN | JSON `ProductUpdateIn` | `ProductOut` |
-| `DELETE` | `/api/v1/admin/products/{product_id}` | ADMIN | — | Vô hiệu hóa sản phẩm (204) |
-| `POST` | `/api/v1/admin/products/{product_id}/batches` | ADMIN | JSON `BatchIn` | Batch (201) |
-| `GET` | `/api/v1/admin/products/{product_id}/batches` | ADMIN | — | Danh sách batch |
-| `PUT` | `/api/v1/admin/products/{product_id}/prices/{customer_group}` | ADMIN | JSON `PriceRuleIn` | Price rule |
-| `POST` | `/api/v1/admin/delivery-slots` | ADMIN | JSON `DeliverySlotIn` | Delivery slot (201) |
-| `GET` | `/api/v1/delivery-slots` | USER | — | Danh sách delivery slot |
+### 1.3. Sổ địa chỉ giao hàng (Addresses)
 
-Các input chính:
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/addresses` | USER | Danh sách địa chỉ nhận hàng của user | — | Danh sách `AddressOut` |
+| `POST` | `/api/v1/addresses` | USER | Thêm địa chỉ mới | JSON `AddressIn`: `recipient`, `phone`, `line1`, `ward?`, `district?`, `city`, `is_default?` | `AddressOut` (201) |
+| `PATCH` | `/api/v1/addresses/{address_id}` | USER | Cập nhật địa chỉ nhận hàng | JSON `AddressIn` | `AddressOut` |
+| `DELETE` | `/api/v1/addresses/{address_id}` | USER | Xóa địa chỉ | — | 204 No Content |
 
-- `ProductIn`: `name`, `description?`, `category_id?`, `unit?`, `image_url?`, `base_price`.
-- `ProductUpdateIn`: các trường của sản phẩm đều tùy chọn.
-- `BatchIn`: `batch_date`, `initial_quantity`, `is_open?`.
-- `PriceRuleIn`: `customer_group` (`STUDENT` hoặc `WORKING`), `unit_price`.
-- `DeliverySlotIn`: `name`, `customer_group?`, `fee`, `is_active?`.
-- `ProductOut` có `available_quantity`. Endpoint khách hàng `GET /api/v1/catalog/me` còn trả `batches`: các lô đang mở và còn hàng, mỗi lô gồm `id` (dùng làm `batch_id` khi tạo đơn), `batch_date`, `is_open` và `available_quantity`.
+---
 
-### 1.4. Orders
+### 1.4. Danh mục, Sản phẩm, Tồn kho & Khung giờ giao hàng
 
-| Method | Path | Quyền | Request/query chính | Response |
-|---|---|---|---|---|
-| `POST` | `/api/v1/orders` | USER | JSON `OrderCreateIn` | `OrderOut` (201) |
-| `GET` | `/api/v1/orders` | USER | Query `status?` | Danh sách `OrderOut` |
-| `GET` | `/api/v1/orders/{order_id}` | USER | — | `OrderOut` |
-| `GET` | `/api/v1/orders/{order_id}/history` | USER | — | Lịch sử trạng thái |
-| `PATCH` | `/api/v1/admin/orders/{order_id}/status` | ADMIN | JSON `OrderStatusIn` | `OrderOut` |
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/categories` | PUBLIC | Lấy danh mục sản phẩm | — | Danh sách `CategoryOut` |
+| `POST` | `/api/v1/admin/categories` | ADMIN | Tạo danh mục mới | JSON `CategoryIn`: `name` | `CategoryOut` (201) |
+| `GET` | `/api/v1/products` | PUBLIC | Danh sách sản phẩm khả dụng | Query `category_id?`, `shop_id?` | Danh sách `ProductOut` |
+| `GET` | `/api/v1/catalog/me` | USER | Danh mục kèm giá theo nhóm khách & đợt hàng | Query `category_id?`, `shop_id?` | Danh sách `ProductOut` (kèm batches) |
+| `POST` | `/api/v1/admin/products` | ADMIN/SHOP | Tạo sản phẩm mới | JSON `ProductIn`: `name`, `category_id`, `base_price`, `unit`, `shop_id?` | `ProductOut` (201) |
+| `PATCH` | `/api/v1/admin/products/{product_id}` | ADMIN/SHOP | Cập nhật thông tin sản phẩm | JSON `ProductUpdateIn` | `ProductOut` |
+| `DELETE` | `/api/v1/admin/products/{product_id}` | ADMIN/SHOP | Vô hiệu hóa (ẩn) sản phẩm | — | 204 No Content |
+| `POST` | `/api/v1/admin/products/{product_id}/batches` | ADMIN/SHOP | Nhập lô hàng tồn kho mới | JSON `BatchIn`: `batch_date`, `initial_quantity`, `is_open?` | `BatchOut` (201) |
+| `GET` | `/api/v1/admin/products/{product_id}/batches` | ADMIN/SHOP | Xem lịch sử các lô tồn kho của sản phẩm | — | Danh sách `BatchOut` |
+| `PUT` | `/api/v1/admin/products/{product_id}/prices/{customer_group}` | ADMIN | Thiết lập chính sách giá theo nhóm khách | JSON `PriceRuleIn`: `unit_price` | `PriceRuleOut` |
+| `GET` | `/api/v1/delivery-slots` | USER | Danh sách khung giờ giao hàng đang kích hoạt | — | Danh sách `DeliverySlotOut` |
+| `POST` | `/api/v1/admin/delivery-slots` | ADMIN | Tạo khung giờ giao hàng mới | JSON `DeliverySlotIn`: `name`, `fee`, `customer_group?` | `DeliverySlotOut` (201) |
+| `DELETE` | `/api/v1/admin/delivery-slots/{slot_id}` | ADMIN | Xóa khung giờ giao hàng | — | `{ "message": "Đã xóa khung giờ" }` |
 
-`OrderCreateIn` gồm:
+---
 
-```json
-{
-  "items": [
-    { "batch_id": 1, "quantity": 1 }
-  ],
-  "delivery_type": "PICKUP",
-  "delivery_address": "",
-  "delivery_slot_id": null,
-  "note": ""
-}
-```
+### 1.5. Đơn hàng & Điều phối (Orders & Logistics)
 
-`OrderStatusIn.status` nhận một trong: `APPROVED`, `REJECTED`, `PREPARING`, `DELIVERING`, `COMPLETED`, `CANCELLED`.
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `POST` | `/api/v1/orders` | USER | Tạo đơn hàng mới | JSON `OrderCreateIn`: `items`, `delivery_type`, `delivery_address?`, `delivery_slot_id?`, `payment_method?` | `OrderOut` (201) |
+| `GET` | `/api/v1/orders` | USER | Danh sách đơn hàng (tự động cách ly theo role) | Query `status?`, `search?`, `shop_id?`, `shipper_id?` | Danh sách `OrderOut` |
+| `GET` | `/api/v1/orders/{order_id}` | USER | Xem chi tiết đơn hàng | — | `OrderOut` (kèm danh sách món, shipper, shop) |
+| `GET` | `/api/v1/orders/{order_id}/history` | USER | Xem lịch sử chuyển đổi trạng thái đơn | — | Danh sách `OrderStatusHistoryOut` |
+| `PATCH` | `/api/v1/admin/orders/{order_id}/status` | USER | Cập nhật trạng thái (Admin, Shop xác nhận/hủy, Khách hủy đơn chờ) | JSON `OrderStatusIn`: `status`, `note?` | `OrderOut` |
+| `PATCH` | `/api/v1/orders/{order_id}/assign-shipper` | ADMIN/SHOP | Điều phối gán Shipper cho đơn hàng | JSON: `shipper_id` | `OrderOut` |
 
-### 1.5. Product requests and notifications
+---
 
-| Method | Path | Quyền | Request/query chính | Response |
-|---|---|---|---|---|
-| `POST` | `/api/v1/product-requests` | USER | JSON `ProductRequestIn` | Product request (201) |
-| `GET` | `/api/v1/product-requests` | USER | — | Danh sách product request |
-| `PATCH` | `/api/v1/admin/product-requests/{request_id}` | ADMIN | JSON `ProductRequestResponseIn` | Product request đã xử lý |
-| `GET` | `/api/v1/notifications` | USER | — | Danh sách `NotificationOut` |
-| `PATCH` | `/api/v1/notifications/{notification_id}/read` | USER | — | Không có nội dung (204) |
+### 1.6. Nghiệp vụ Shipper Giao vận (Shipper Dedicated)
 
-`ProductRequestIn` gồm `product_name`, `description?`.
-`ProductRequestResponseIn.status` nhận một trong: `QUOTED`, `ACCEPTED`, `REJECTED`, `FULFILLED`; ngoài ra có `admin_response?`, `quoted_price?`.
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/shipper/orders` | SHIPPER | Danh sách đơn hàng được gán hoặc chờ nhận | Query `status?`, `available_only: bool` | Danh sách `OrderOut` |
+| `PATCH` | `/api/v1/shipper/orders/{order_id}/claim` | SHIPPER | Shipper chủ động nhận đơn giao | — | `OrderOut` |
+| `PATCH` | `/api/v1/shipper/orders/{order_id}/pickup` | SHIPPER | Xác nhận đã lấy hàng từ Shop/Kho | Query `note?` | `OrderOut` |
+| `PATCH` | `/api/v1/shipper/orders/{order_id}/delivering` | SHIPPER | Bắt đầu di chuyển giao hàng cho khách | Query `note?` | `OrderOut` |
+| `PATCH` | `/api/v1/shipper/orders/{order_id}/complete` | SHIPPER | Hoàn thành giao hàng & xác nhận tiền COD | Query `paid_amount?`, `note?` | `OrderOut` |
 
-### 1.6. Admin, moderation và reports
+---
 
-| Method | Path | Quyền | Request/query chính | Response |
-|---|---|---|---|---|
-| `POST` | `/api/v1/admin/moderation/terms` | ADMIN | Query `term` | Moderation term (201) |
-| `GET` | `/api/v1/admin/reports/summary` | ADMIN | Query bắt buộc `date_from`, `date_to` (ISO datetime) | Báo cáo tổng hợp |
-| `GET` | `/api/v1/admin/audit-logs` | ADMIN | Query `limit` (mặc định 100, 1-500) | Danh sách audit log |
+### 1.7. Bảng tin Quảng bá & Món ngon (Posts / Newsfeed)
 
-### 1.7. WebSocket realtime
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/posts` | PUBLIC | Lấy danh sách bài đăng Newfeed | Query `category_id?`, `shop_id?`, `post_type?` | Danh sách `PostOut` |
+| `POST` | `/api/v1/posts` | ADMIN/SHOP | Tạo bài đăng quảng bá / món trong ngày | JSON `PostIn`: `title`, `content`, `product_id?`, `sale_price?`, `group_prices?` | `PostOut` (201) |
+| `PATCH` | `/api/v1/posts/{post_id}` | ADMIN/SHOP | Cập nhật bài đăng (chỉ tác giả hoặc admin) | JSON `PostIn` | `PostOut` |
+| `DELETE` | `/api/v1/posts/{post_id}` | ADMIN/SHOP | Xóa bài đăng | — | 204 No Content |
 
-| Protocol | Path | Quyền | Mô tả |
+---
+
+### 1.8. Đánh giá & Phản hồi (Reviews & Ratings)
+
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/products/{product_id}/reviews` | PUBLIC | Xem danh sách đánh giá của sản phẩm | — | Danh sách `ProductReviewOut` |
+| `POST` | `/api/v1/products/{product_id}/reviews` | CUSTOMER | Đánh giá sản phẩm đã mua hoàn tất | JSON `ProductReviewIn`: `rating`, `comment?`, `order_id?` | `ProductReviewOut` (201) |
+| `GET` | `/api/v1/shop/reviews` | SHOP | Xem đánh giá đối với các sản phẩm của shop mình | — | Danh sách `ProductReviewOut` |
+| `POST` | `/api/v1/reviews/{review_id}/reply` | ADMIN/SHOP | Cửa hàng phản hồi đánh giá của khách | JSON `ReviewReplyIn`: `reply` | `ProductReviewOut` |
+| `POST` | `/api/v1/orders/{order_id}/shipper-review` | CUSTOMER | Đánh giá thái độ & tốc độ của Shipper | JSON `ShipperReviewIn`: `rating`, `attitude_rating`, `speed_rating`, `comment?` | `ShipperReviewOut` (201) |
+| `GET` | `/api/v1/admin/reviews` | ADMIN | Toàn bộ đánh giá trên sàn để kiểm duyệt | — | `{ "product_reviews": [], "shipper_reviews": [] }` |
+
+---
+
+### 1.9. Tin nhắn Realtime Chat
+
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/chat/messages` | USER | Lấy tin nhắn trao đổi (theo đơn hoặc người nhận) | Query `peer_id?`, `order_id?` | Danh sách `ChatMessageOut` |
+| `POST` | `/api/v1/chat/messages` | USER | Gửi tin nhắn chat (có kiểm duyệt từ khóa tự động) | JSON `ChatMessageIn`: `content`, `receiver_id?`, `order_id?` | `ChatMessageOut` (201) |
+| `GET` | `/api/v1/chat/users` | USER | Danh bạ người dùng có thể nhắn tin | Query `search?`, `role?` | Danh sách `ChatUserOut` |
+
+---
+
+### 1.10. Nhóm khách hàng & Cấu hình Thuế VAT
+
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/customer-groups` | PUBLIC | Danh sách nhóm khách hàng (Sinh viên, Người đi làm...) | — | Danh sách `CustomerGroupOut` |
+| `POST` | `/api/v1/admin/customer-groups` | ADMIN | Tạo nhóm khách hàng mới | JSON: `code`, `name`, `discount_percent` | `CustomerGroupOut` (201) |
+| `GET` | `/api/v1/admin/vat` | USER | Danh sách các cấu hình thuế VAT hiện tại | — | Danh sách `VatConfigOut` |
+| `GET` | `/api/v1/admin/vat/history` | ADMIN | Lịch sử các lần thay đổi biểu thuế VAT | — | Danh sách `VatHistoryOut` |
+
+---
+
+### 1.11. Yêu cầu sản phẩm, Thông báo & Kiểm duyệt nội dung
+
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `POST` | `/api/v1/product-requests` | USER | Gửi yêu cầu tìm mặt hàng đặc thù | JSON `ProductRequestIn`: `product_name`, `description?` | `ProductRequestOut` (201) |
+| `GET` | `/api/v1/product-requests` | USER | Danh sách yêu cầu mặt hàng của tôi / của khách | — | Danh sách `ProductRequestOut` |
+| `PATCH` | `/api/v1/admin/product-requests/{request_id}` | USER | Xử lý báo giá / chấp nhận yêu cầu | JSON `ProductRequestResponseIn`: `status`, `quoted_price?`, `admin_response?` | `ProductRequestOut` |
+| `GET` | `/api/v1/notifications` | USER | Lấy danh sách thông báo của tài khoản | — | Danh sách `NotificationOut` |
+| `PATCH` | `/api/v1/notifications/{notification_id}/read` | USER | Đánh dấu đã đọc thông báo | — | 204 No Content |
+| `POST` | `/api/v1/admin/notifications/broadcast` | ADMIN | Phát thông báo chung tới toàn bộ người dùng | JSON `BroadcastNotificationIn`: `title`, `body`, `target_role?` | `{ "notified_count": int }` |
+| `POST` | `/api/v1/admin/moderation/terms` | ADMIN | Thêm từ khóa nhạy cảm / spam vào danh sách đen | Query `term: string` | `ModerationTermOut` (201) |
+| `DELETE` | `/api/v1/admin/moderation/terms/{term_id}` | ADMIN | Xóa từ khóa kiểm duyệt | — | 204 No Content |
+| `GET` | `/api/v1/admin/moderation/violations` | ADMIN | Xem nhật ký các vi phạm tiêu chuẩn cộng đồng | — | Danh sách `ModerationViolationOut` |
+
+---
+
+### 1.12. Báo cáo, Thống kê & Nhật ký kiểm toán (Reports & Audit)
+
+| Method | Path | Quyền | Mô tả | Request Body / Query | Phản hồi |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/admin/reports/summary` | ADMIN | Báo cáo tài chính & vận hành theo khoảng thời gian | Query `date_from`, `date_to` (ISO 8601) | `FinancialSummaryOut` |
+| `GET` | `/api/v1/admin/audit-logs` | ADMIN | Xem nhật ký thao tác kiểm toán của hệ thống | Query `limit?` (mặc định 100) | Danh sách `AuditLogOut` |
+
+---
+
+### 1.13. Kết nối Realtime WebSocket
+
+| Giao thức | Path | Quyền | Mô tả |
 |---|---|---|---|
-| `WS` | `/api/v1/ws?token={access_token}` | USER | Kết nối realtime; token được truyền qua query string |
+| `WS` | `/api/v1/ws?token={access_token}` | USER | Kết nối 2 chiều duy trì trạng thái realtime |
 
-Server event có envelope:
-
+- **Event Envelope:**
 ```json
 {
-  "event_id": "string",
-  "type": "connection.ready",
-  "occurred_at": "datetime",
-  "data": {}
+  "event_id": "uuid-string",
+  "type": "order.status_changed",
+  "occurred_at": "2026-11-08T22:00:00Z",
+  "data": { "order_id": 105, "status": "DELIVERING" }
 }
 ```
-
-Các event chính: `connection.ready`, `inventory.updated`, `order.status_changed`, `notification.created`.
-
-## 2. Database schema
-
-Ký hiệu: `PK` = khóa chính, `FK` = khóa ngoại, `UQ` = unique, `NULL` = cho phép rỗng. Kiểu `NUMERIC(p,s)` dùng cho số tiền/số lượng chính xác.
-
-### 2.1. Bảng người dùng và địa chỉ
-
-#### `users`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `email` | VARCHAR(254) | NOT NULL, UQ, index |
-| `full_name` | VARCHAR(120) | NOT NULL |
-| `password_hash` | VARCHAR(255) | NOT NULL |
-| `role` | VARCHAR(20) | NOT NULL, mặc định `CUSTOMER`, index |
-| `customer_group` | VARCHAR(30) | NOT NULL, mặc định `STUDENT` |
-| `phone` | VARCHAR(30) | NULL, UQ |
-| `is_active` | BOOLEAN | NOT NULL, mặc định `true` |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-#### `addresses`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `user_id` | INTEGER | FK `users.id`, ON DELETE CASCADE |
-| `label` | VARCHAR(50) | NOT NULL, mặc định `Nhà` |
-| `recipient` | VARCHAR(120) | NOT NULL |
-| `phone` | VARCHAR(30) | NOT NULL |
-| `line1` | VARCHAR(255) | NOT NULL |
-| `ward` | VARCHAR(100) | NOT NULL, mặc định rỗng |
-| `district` | VARCHAR(100) | NOT NULL, mặc định rỗng |
-| `city` | VARCHAR(100) | NOT NULL |
-| `is_default` | BOOLEAN | NOT NULL, mặc định `false` |
-
-Index: `ix_address_user_default(user_id, is_default)`.
-
-### 2.2. Bảng catalog, giá và tồn kho
-
-#### `categories`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `name` | VARCHAR(100) | NOT NULL, UQ |
-| `is_active` | BOOLEAN | NOT NULL, mặc định `true` |
-
-#### `products`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `category_id` | INTEGER | NULL, FK `categories.id` |
-| `name` | VARCHAR(180) | NOT NULL, index |
-| `description` | TEXT | NOT NULL, mặc định rỗng |
-| `unit` | VARCHAR(30) | NOT NULL, mặc định `phần` |
-| `image_url` | VARCHAR(500) | NULL |
-| `base_price` | NUMERIC(12,2) | NOT NULL, mặc định `0` |
-| `is_active` | BOOLEAN | NOT NULL, mặc định `true`, index |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-#### `inventory_batches`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `product_id` | INTEGER | FK `products.id` |
-| `batch_date` | DATETIME WITH TIME ZONE | NOT NULL, index |
-| `initial_quantity` | NUMERIC(12,3) | NOT NULL |
-| `approved_quantity` | NUMERIC(12,3) | NOT NULL, mặc định `0` |
-| `is_open` | BOOLEAN | NOT NULL, mặc định `true` |
-| `updated_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-Index: `ix_batch_product_open(product_id, is_open)`.
-`available_quantity = initial_quantity - approved_quantity`, tối thiểu bằng `0`.
-
-#### `price_rules`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `product_id` | INTEGER | FK `products.id` ON DELETE CASCADE |
-| `customer_group` | VARCHAR(30) | NOT NULL |
-| `unit_price` | NUMERIC(12,2) | NOT NULL |
-
-Unique constraint: `(product_id, customer_group)`.
-
-#### `delivery_slots`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `name` | VARCHAR(100) | NOT NULL |
-| `customer_group` | VARCHAR(30) | NOT NULL, mặc định `ALL` |
-| `fee` | NUMERIC(12,2) | NOT NULL, mặc định `0` |
-| `is_active` | BOOLEAN | NOT NULL, mặc định `true` |
-
-### 2.3. Bảng đơn hàng
-
-#### `orders`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `order_number` | VARCHAR(30) | NOT NULL, UQ, index |
-| `user_id` | INTEGER | FK `users.id`, index |
-| `status` | VARCHAR(30) | NOT NULL, mặc định `PENDING`, index |
-| `delivery_type` | VARCHAR(30) | NOT NULL, mặc định `PICKUP` |
-| `delivery_address` | TEXT | NOT NULL, mặc định rỗng |
-| `delivery_fee` | NUMERIC(12,2) | NOT NULL, mặc định `0` |
-| `subtotal` | NUMERIC(12,2) | NOT NULL, mặc định `0` |
-| `total` | NUMERIC(12,2) | NOT NULL, mặc định `0` |
-| `note` | TEXT | NOT NULL, mặc định rỗng |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL, index |
-| `updated_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-#### `order_items`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `order_id` | INTEGER | FK `orders.id` ON DELETE CASCADE, index |
-| `product_id` | INTEGER | FK `products.id` |
-| `batch_id` | INTEGER | FK `inventory_batches.id` |
-| `product_name_snapshot` | VARCHAR(180) | NOT NULL |
-| `unit_snapshot` | VARCHAR(30) | NOT NULL |
-| `quantity` | NUMERIC(12,3) | NOT NULL |
-| `unit_price` | NUMERIC(12,2) | NOT NULL |
-| `line_total` | NUMERIC(12,2) | NOT NULL |
-
-#### `order_status_history`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `order_id` | INTEGER | FK `orders.id` ON DELETE CASCADE, index |
-| `changed_by` | INTEGER | FK `users.id` |
-| `old_status` | VARCHAR(30) | NOT NULL |
-| `new_status` | VARCHAR(30) | NOT NULL |
-| `note` | TEXT | NOT NULL, mặc định rỗng |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-### 2.4. Bảng yêu cầu sản phẩm và thông báo
-
-#### `product_requests`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `user_id` | INTEGER | FK `users.id`, index |
-| `product_name` | VARCHAR(180) | NOT NULL |
-| `description` | TEXT | NOT NULL, mặc định rỗng |
-| `status` | VARCHAR(30) | NOT NULL, mặc định `OPEN`, index |
-| `admin_response` | TEXT | NOT NULL, mặc định rỗng |
-| `quoted_price` | NUMERIC(12,2) | NULL |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-#### `notifications`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `user_id` | INTEGER | FK `users.id`, index |
-| `title` | VARCHAR(160) | NOT NULL |
-| `body` | TEXT | NOT NULL, mặc định rỗng |
-| `event_type` | VARCHAR(60) | NOT NULL, mặc định `general` |
-| `is_read` | BOOLEAN | NOT NULL, mặc định `false` |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-### 2.5. Moderation
-
-#### `moderation_terms`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `term` | VARCHAR(100) | NOT NULL, UQ |
-| `is_active` | BOOLEAN | NOT NULL, mặc định `true` |
-
-#### `moderation_violations`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `user_id` | INTEGER | FK `users.id`, index |
-| `matched_term` | VARCHAR(100) | NOT NULL |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-### 2.6. Bảng audit
-
-#### `audit_logs`
-
-| Cột | Kiểu | Ràng buộc / mặc định |
-|---|---|---|
-| `id` | INTEGER | PK |
-| `actor_id` | INTEGER | NULL, FK `users.id` |
-| `action` | VARCHAR(100) | NOT NULL, index |
-| `entity_type` | VARCHAR(60) | NOT NULL |
-| `entity_id` | VARCHAR(60) | NOT NULL |
-| `details` | TEXT | NOT NULL, mặc định rỗng |
-| `created_at` | DATETIME WITH TIME ZONE | NOT NULL |
-
-## 3. Quan hệ chính
-
-```text
-users 1--N addresses
-users 1--N orders
-users 1--N product_requests
-users 1--N notifications
-users 1--N moderation_violations
-users 1--N audit_logs
-
-categories 1--N products
-products 1--N inventory_batches
-products 1--N price_rules
-products 1--N order_items
-
-orders 1--N order_items
-orders 1--N order_status_history
-inventory_batches 1--N order_items
-```
-
-## 4. Ghi chú triển khai
-
-- Tất cả endpoint REST được mount dưới `/api/v1`, trừ endpoint root `/`.
-- Endpoint `/admin/*` yêu cầu role `ADMIN`.
-- Không đưa file database `freshflow.db` hoặc dữ liệu thật vào tài liệu gửi ra ngoài nếu không cần thiết; file này chỉ chứa cấu trúc và hợp đồng API.
-- Migration hiện tại: `0001_initial`.
+- **Các sự kiện chính:**
+  - `connection.ready`: Xác lập kết nối thành công.
+  - `inventory.updated`: Tồn kho sản phẩm thay đổi.
+  - `order.new`: Có đơn hàng mới phát sinh cần chuẩn bị.
+  - `order.status_changed`: Trạng thái đơn hàng cập nhật.
+  - `order.assigned`: Đơn hàng đã được chỉ định Shipper.
+  - `notification.created`: Có thông báo mới cho người dùng.
+  - `chat.message`: Tin nhắn trò chuyện mới được gửi tới.

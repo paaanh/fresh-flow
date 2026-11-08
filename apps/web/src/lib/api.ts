@@ -73,6 +73,8 @@ export type UserOut = {
   role: string;
   customer_group: CustomerGroup;
   is_active: boolean;
+  is_email_verified?: boolean;
+  is_phone_verified?: boolean;
   shop_name?: string | null;
   shop_description?: string;
   shop_address?: string;
@@ -103,7 +105,10 @@ const query = (values: Record<string, string | number | boolean | undefined>) =>
 
 export const freshflow = {
   health: () => api.get<unknown>('/health'),
-  register: (body: { email: string; full_name: string; password: string; phone?: string; customer_group?: CustomerGroup; role?: string }) => api.post<UserOut>('/auth/register', body),
+  register: (body: { email: string; full_name: string; password: string; phone?: string; customer_group?: CustomerGroup; role?: string; otp_code?: string }) => api.post<UserOut>('/auth/register', body),
+  requestOtp: (target: string, purpose = 'register') => api.post<{ success: boolean; message: string; otp_code?: string; expires_in?: number }>('/auth/request-otp', { target, purpose }),
+  verifyOtp: (target: string, code: string, purpose = 'register') => api.post<{ success: boolean; message: string; verified: boolean }>('/auth/verify-otp', { target, code, purpose }),
+  resetPassword: (body: { target: string; code: string; new_password: string }) => api.post<{ success: boolean; message: string }>('/auth/reset-password', body),
   login: async (username: string, password: string) => {
     authToken.clear();
     const token = await api.post<{ access_token: string; token_type: string }>('/auth/login', { username, password });
@@ -115,6 +120,7 @@ export const freshflow = {
   updateProfile: (body: { full_name?: string; phone?: string | null; shop_name?: string | null; shop_description?: string; shop_address?: string; vehicle_info?: string }) => api.patch<UserOut>('/users/profile', body),
   users: (search?: string) => api.get<UserOut[]>(`/admin/users${query({ search })}`),
   userStatus: (id: number, is_active: boolean) => api.patch<UserOut>(`/admin/users/${id}/status${query({ is_active })}`, undefined),
+  adminUpdateUser: (id: number, body: Record<string, unknown>) => api.patch<UserOut>(`/admin/users/${id}`, body),
   shippers: () => api.get<UserOut[]>('/shippers'),
   shops: () => api.get<UserOut[]>('/shops'),
 
@@ -139,6 +145,7 @@ export const freshflow = {
   price: <T>(id: number, customer_group: CustomerGroup, unit_price: number) => api.put<T>(`/admin/products/${id}/prices/${customer_group}`, { customer_group, unit_price }),
   deliverySlots: <T>() => api.get<T[]>('/delivery-slots'),
   createDeliverySlot: <T>(body: { name: string; customer_group?: CustomerGroup | 'ALL'; fee: number; is_active?: boolean }) => api.post<T>('/admin/delivery-slots', body),
+  deleteDeliverySlot: <T>(id: number) => api.delete<T>(`/admin/delivery-slots/${id}`),
 
   // Orders
   createOrder: <T>(body: OrderCreateIn) => api.post<T>('/orders', body),
@@ -176,6 +183,7 @@ export const freshflow = {
 
   // Reviews
   productReviews: <T>(productId: number) => api.get<T[]>(`/products/${productId}/reviews`),
+  orderReviews: <T>(orderId: number) => api.get<T>(`/orders/${orderId}/reviews`),
   shopReviews: <T>() => api.get<T[]>('/shop/reviews'),
   createProductReview: <T>(productId: number, body: unknown) => api.post<T>(`/products/${productId}/reviews`, body),
   replyReview: <T>(reviewId: number, reply: string) => api.post<T>(`/reviews/${reviewId}/reply`, { reply }),
@@ -196,7 +204,10 @@ export const freshflow = {
   notifications: <T>() => api.get<T[]>('/notifications'),
   readNotification: (id: number) => api.patch<void>(`/notifications/${id}/read`, undefined),
   broadcastNotification: <T>(body: { title: string; body: string; target_role?: string | null }) => api.post<T>('/admin/notifications/broadcast', body),
+  moderationTerms: <T>() => api.get<T[]>('/admin/moderation/terms'),
   addModerationTerm: <T>(term: string) => api.post<T>(`/admin/moderation/terms${query({ term })}`),
+  deleteModerationTerm: (id: number) => api.delete<void>(`/admin/moderation/terms/${id}`),
+  moderationViolations: <T>() => api.get<T[]>('/admin/moderation/violations'),
 
   // Financial Dashboard Reports
   report: <T>(date_from: string, date_to: string) => api.get<T>(`/admin/reports/summary${query({ date_from, date_to })}`),

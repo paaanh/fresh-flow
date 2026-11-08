@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faChartLine,
@@ -127,24 +128,32 @@ export default function AdminDashboardView({
       {/* 8 Stats Cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {[
-          { label: 'Tổng người dùng', value: summary.total_users.toString(), icon: faUsers, color: 'text-blue-600 bg-blue-50' },
-          { label: 'Tổng số Shop', value: summary.total_shops.toString(), icon: faStore, color: 'text-amber-600 bg-amber-50' },
-          { label: 'Tổng sản phẩm', value: summary.total_products.toString(), icon: faShoppingBag, color: 'text-emerald-600 bg-emerald-50' },
-          { label: 'Tổng đơn hàng', value: summary.total_orders.toString(), icon: faReceipt, color: 'text-purple-600 bg-purple-50' },
-          { label: 'Giao thành công', value: `${summary.delivery_success_rate}%`, icon: faCheckCircle, color: 'text-teal-600 bg-teal-50' },
-          { label: 'Tổng doanh thu', value: money(summary.total_revenue), icon: faCoins, color: 'text-green-700 bg-green-50' },
-          { label: 'Tổng tiền đã thu', value: money(summary.total_paid), icon: faFileInvoiceDollar, color: 'text-indigo-600 bg-indigo-50' },
-          { label: 'Tổng tiền còn nợ', value: money(summary.total_debt), icon: faClock, color: 'text-rose-600 bg-rose-50' },
+          { label: 'Tổng người dùng', value: summary.total_users.toString(), icon: faUsers, color: 'text-blue-600 bg-blue-50', href: '/admin/customers' },
+          { label: 'Tổng số Shop', value: summary.total_shops.toString(), icon: faStore, color: 'text-amber-600 bg-amber-50', href: '/admin/customers' },
+          { label: 'Tổng sản phẩm', value: summary.total_products.toString(), icon: faShoppingBag, color: 'text-emerald-600 bg-emerald-50', href: '/admin/products' },
+          { label: 'Tổng đơn hàng', value: summary.total_orders.toString(), icon: faReceipt, color: 'text-purple-600 bg-purple-50', href: '/admin/orders' },
+          { label: 'Giao thành công', value: `${summary.delivery_success_rate}%`, icon: faCheckCircle, color: 'text-teal-600 bg-teal-50', href: '/admin/deliveries' },
+          { label: 'Tổng doanh thu', value: money(summary.total_revenue), icon: faCoins, color: 'text-green-700 bg-green-50', href: '/admin/reports' },
+          { label: 'Tổng tiền đã thu', value: money(summary.total_paid), icon: faFileInvoiceDollar, color: 'text-indigo-600 bg-indigo-50', href: '/admin/reports' },
+          { label: 'Tổng tiền còn nợ', value: money(summary.total_debt), icon: faClock, color: 'text-rose-600 bg-rose-50', href: '/admin/reports' },
         ].map((card, i) => (
-          <div key={i} style={i < 4 ? { borderTopColor: ['#17a2b8', '#28a745', '#f0b400', '#dc3545'][i] } : undefined} className={`flex flex-col justify-between rounded-2xl border border-[#e8ede8] bg-white p-4 shadow-sm ${i < 4 ? 'border-t-4' : ''}`}>
+          <Link
+            key={i}
+            href={card.href}
+            style={i < 4 ? { borderTopColor: ['#17a2b8', '#28a745', '#f0b400', '#dc3545'][i] } : undefined}
+            className={`group flex flex-col justify-between rounded-2xl border border-[#e8ede8] bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-[#176b52]/40 hover:shadow-md ${i < 4 ? 'border-t-4' : ''}`}
+          >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#839188]">{card.label}</span>
+              <span className="text-[11px] font-semibold text-[#839188] group-hover:text-[#176b52]">{card.label}</span>
               <div className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm ${card.color}`}>
                 <FontAwesomeIcon icon={card.icon} />
               </div>
             </div>
-            <div className="mt-3 text-lg font-extrabold text-[#1f2e26]">{card.value}</div>
-          </div>
+            <div className="mt-3 flex items-baseline justify-between">
+              <span className="text-lg font-extrabold text-[#1f2e26]">{card.value}</span>
+              <span className="text-[10px] font-bold text-[#176b52] opacity-0 transition group-hover:opacity-100">Mở →</span>
+            </div>
+          </Link>
         ))}
       </div>
 
@@ -235,17 +244,27 @@ export default function AdminDashboardView({
         </section>
 
         <section className="overflow-hidden rounded-2xl border border-[#e8ede8] bg-white shadow-sm">
-          <div className="border-b border-[#edf1ee] px-5 py-4">
-            <h3 className="text-sm font-bold text-[#1f2f27]">Đơn hàng gần đây</h3>
-            <p className="mt-1 text-[11px] text-[#86968d]">Theo dõi hoạt động mới nhất</p>
+          <div className="flex items-center justify-between border-b border-[#edf1ee] px-5 py-4">
+            <div>
+              <h3 className="text-sm font-bold text-[#1f2f27]">Đơn hàng gần đây</h3>
+              <p className="mt-1 text-[11px] text-[#86968d]">Theo dõi hoạt động mới nhất</p>
+            </div>
+            <Link href="/admin/orders" className="text-xs font-bold text-[#176b52] hover:underline">
+              Xem tất cả →
+            </Link>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[460px] text-left text-xs">
               <thead className="bg-[#f7faf8] text-[10px] uppercase tracking-wide text-[#819087]"><tr><th className="px-5 py-3">Mã đơn / Khách hàng</th><th className="px-3 py-3">Trạng thái</th><th className="px-5 py-3 text-right">Tổng tiền</th></tr></thead>
               <tbody className="divide-y divide-[#edf1ee]">
                 {recentOrders.slice(0, 6).map(order => (
-                  <tr key={order.apiId ?? order.id}>
-                    <td className="px-5 py-3"><div className="font-bold text-[#33443a]">#{order.id}</div><div className="mt-1 text-[10px] text-[#86968d]">{order.customer_name || order.customer || 'Khách hàng'}</div></td>
+                  <tr key={order.apiId ?? order.id} className="hover:bg-slate-50">
+                    <td className="px-5 py-3">
+                      <Link href={`/admin/orders/${encodeURIComponent(order.id)}`} className="font-bold text-[#176b52] hover:underline">
+                        #{order.id}
+                      </Link>
+                      <div className="mt-1 text-[10px] text-[#86968d]">{order.customer_name || order.customer || 'Khách hàng'}</div>
+                    </td>
                     <td className="px-3 py-3"><span className="rounded-full bg-[#eef7f1] px-2 py-1 text-[10px] font-semibold text-[#176b52]">{order.status}</span></td>
                     <td className="px-5 py-3 text-right font-bold text-[#26372d]">{money(order.total)}</td>
                   </tr>

@@ -241,7 +241,7 @@ export default function Newfeed({
           const customerView = currentUser?.role === 'CUSTOMER';
           const isAuthor =
             currentUser?.role === 'ADMIN' ||
-            (currentUser?.role === 'SHOP' && (post.author_id === currentUser.id || !post.author_id));
+            (currentUser?.role === 'SHOP' && post.author_id === currentUser.id);
 
           return (
             <article

@@ -12,6 +12,7 @@ from app.models import User
 
 password_hash = PasswordHash.recommended()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.api_v1_prefix}/auth/login")
+oauth2_optional_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.api_v1_prefix}/auth/login", auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -55,6 +56,17 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if user is None or not user.is_active:
         raise unauthorized
     return user
+
+
+def get_optional_current_user(token: str | None = Depends(oauth2_optional_scheme), db: Session = Depends(get_db)) -> User | None:
+    if not token:
+        return None
+    user_id = decode_user_token(token)
+    if user_id:
+        u = db.get(User, user_id)
+        if u and u.is_active:
+            return u
+    return None
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

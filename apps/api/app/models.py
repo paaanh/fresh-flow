@@ -21,6 +21,8 @@ class User(Base):
     customer_group: Mapped[str] = mapped_column(String(30), default="STUDENT")    # STUDENT, WORKING, GROUP_A, GROUP_B, COLLECTIVE
     phone: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     shop_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     shop_description: Mapped[str] = mapped_column(Text, default="")
     shop_address: Mapped[str] = mapped_column(String(255), default="")

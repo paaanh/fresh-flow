@@ -165,3 +165,38 @@ def test_auth_catalog_backend_image_and_order_approval(client: TestClient):
     assert customer_chat_users.status_code == 200
     assert len(customer_chat_users.json()) >= 1
     assert all(u["role"] in {"SHOP", "ADMIN"} for u in customer_chat_users.json())
+
+    # Admin update user detail test
+    cust_id = admin_chat_users.json()[0]["id"]
+    updated_user = client.patch(
+        f"/api/v1/admin/users/{cust_id}",
+        headers=admin_headers,
+        json={"customer_group": "GROUP_A", "phone": "0909888777"},
+    )
+    assert updated_user.status_code == 200, updated_user.text
+    assert updated_user.json()["customer_group"] == "GROUP_A"
+    assert updated_user.json()["phone"] == "0909888777"
+
+    # Moderation terms list & delete & violations test
+    term_created = client.post("/api/v1/admin/moderation/terms?term=hang_gia_test", headers=admin_headers)
+    assert term_created.status_code in {200, 201}
+    terms_list = client.get("/api/v1/admin/moderation/terms", headers=admin_headers)
+    assert terms_list.status_code == 200
+    assert any(t["term"] == "hang_gia_test" for t in terms_list.json())
+    term_id = term_created.json()["id"]
+    term_deleted = client.delete(f"/api/v1/admin/moderation/terms/{term_id}", headers=admin_headers)
+    assert term_deleted.status_code == 204
+    violations_list = client.get("/api/v1/admin/moderation/violations", headers=admin_headers)
+    assert violations_list.status_code == 200
+
+    # Order history & order reviews test
+    order_id = order.json()["id"]
+    history_res = client.get(f"/api/v1/orders/{order_id}/history", headers=admin_headers)
+    assert history_res.status_code == 200
+    assert len(history_res.json()) >= 1
+    assert "actor_name" in history_res.json()[0]
+
+    order_reviews_res = client.get(f"/api/v1/orders/{order_id}/reviews", headers=customer_headers)
+    assert order_reviews_res.status_code == 200
+    assert "product_reviews" in order_reviews_res.json()
+    assert "shipper_reviews" in order_reviews_res.json()

@@ -101,14 +101,30 @@ export function normalizeRequest(raw: any): ProductRequest {
     QUOTED: 'Đã báo giá',
     FULFILLED: 'Hoàn tất',
   };
+  const desc = String(raw.description || '');
+  let parsedCategory = raw.category_name || raw.category || '';
+  let parsedQty = raw.quantity_requested ?? raw.quantity ?? '';
+  if (!parsedCategory && desc.includes('Danh mục:')) {
+    const match = desc.match(/Danh mục:\s*([^;|.]+)/i);
+    if (match) parsedCategory = match[1].trim();
+  }
+  if (!parsedQty && (desc.includes('số lượng:') || desc.includes('Số lượng:'))) {
+    const match = desc.match(/số lượng:\s*([^;|.]+)/i);
+    if (match) parsedQty = match[1].trim();
+  }
   return {
     id: Number(raw.id),
     name: raw.product_name || raw.name || 'Mặt hàng',
-    category: raw.category_name || raw.category || 'Khác',
-    quantity: String(raw.quantity_requested ?? raw.quantity ?? 'Chưa xác định'),
+    category: parsedCategory || 'Nông sản theo yêu cầu',
+    quantity: String(parsedQty || (desc ? desc : 'Chưa xác định')),
     customer: raw.customer_name || raw.user?.full_name || 'Khách hàng',
-    date: raw.created_at || raw.date || 'Mới tạo',
+    date: raw.created_at
+      ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(raw.created_at))
+      : raw.date || 'Mới tạo',
     status: states[String(raw.status || 'NEW').toUpperCase()] || raw.status || 'Mới',
+    description: desc,
+    admin_response: raw.admin_response || '',
+    quoted_price: raw.quoted_price != null ? Number(raw.quoted_price) : null,
   };
 }
 
@@ -127,15 +143,15 @@ export const toApiOrderStatus = (status: string) =>
   }[status] || status);
 
 export const adminSections = [
-  { label: 'TỔNG QUAN', links: [{ name: 'Tổng quan & Tài chính', href: '/admin/dashboard', icon: faChartLine }] },
-  { label: 'QUẢNG BÁ & BÁN HÀNG', links: [{ name: 'Sản phẩm & Tồn kho', href: '/admin/products', icon: faAppleWhole }] },
-  { label: 'VẬN HÀNH & ĐỐI TÁC', links: [{ name: 'Giao hàng & Shipper', href: '/admin/deliveries', icon: faTruck }, { name: 'Khách hàng & Nhóm', href: '/admin/customers', icon: faUsers }, { name: 'Yêu cầu mặt hàng', href: '/admin/requests', icon: faMessage, count: '3' }] },
+  { label: 'TỔNG QUAN', links: [{ name: 'Tổng quan & Tài chính', href: '/admin/dashboard', icon: faChartLine }, { name: 'Bảng tin Newfeed', href: '/newfeed', icon: faNewspaper }] },
+  { label: 'QUẢNG BÁ & BÁN HÀNG', links: [{ name: 'Sản phẩm & Tồn kho', href: '/admin/products', icon: faAppleWhole }, { name: 'Quản lý Đơn hàng', href: '/admin/orders', icon: faClipboardList }] },
+  { label: 'VẬN HÀNH & ĐỐI TÁC', links: [{ name: 'Giao hàng & Shipper', href: '/admin/deliveries', icon: faTruck }, { name: 'Khách hàng & Nhóm', href: '/admin/customers', icon: faUsers }, { name: 'Yêu cầu mặt hàng', href: '/admin/requests', icon: faMessage }] },
   { label: 'QUẢN TRỊ NÂNG CAO', links: [{ name: 'Báo cáo & Đối soát', href: '/admin/reports', icon: faChartLine }, { name: 'Kiểm duyệt nội dung', href: '/admin/moderation', icon: faSliders }, { name: 'Thông báo', href: '/admin/notifications', icon: faBell }, { name: 'Cài đặt hệ thống', href: '/admin/settings', icon: faGear }] },
 ];
 
 export const shopSections = [
   { label: 'CỬA HÀNG CỦA BẠN', links: [{ name: 'Shop Portal', href: '/shop', icon: faStore }, { name: 'Bảng tin Newfeed', href: '/newfeed', icon: faNewspaper }] },
-  { label: 'SẢN PHẨM & ĐƠN HÀNG', links: [{ name: 'Sản phẩm của Shop', href: '/shop/products', icon: faAppleWhole }, { name: 'Đơn hàng phát sinh', href: '/shop/orders', icon: faClipboardList }, { name: 'Đánh giá & Review', href: '/shop/reviews', icon: faStar }] },
+  { label: 'SẢN PHẨM & ĐƠN HÀNG', links: [{ name: 'Sản phẩm của Shop', href: '/shop/products', icon: faAppleWhole }, { name: 'Đơn hàng phát sinh', href: '/shop/orders', icon: faClipboardList }, { name: 'Yêu cầu mặt hàng', href: '/requests', icon: faMessage }, { name: 'Đánh giá & Review', href: '/shop/reviews', icon: faStar }] },
   { label: 'TƯƠNG TÁC', links: [{ name: 'Tin nhắn với khách', href: '/chat', icon: faComments }, { name: 'Thông báo Shop', href: '/notifications', icon: faBell }] },
 ];
 

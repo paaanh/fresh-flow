@@ -1,6 +1,7 @@
 from app.db import get_db
 from app.core.security import (
     get_current_user,
+    get_optional_current_user,
     require_admin,
     require_shop,
     require_shipper,

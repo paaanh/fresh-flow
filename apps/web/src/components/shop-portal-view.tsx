@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faBox,
@@ -55,6 +56,7 @@ export default function ShopPortalView({
   money,
 }: ShopPortalViewProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'orders' | 'reviews'>(initialTab);
+  const [orderStatusFilter, setOrderStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'>('ALL');
   const [replyText, setReplyText] = useState<Record<number, string>>({});
   const [assigningOrderId, setAssigningOrderId] = useState<number | null>(null);
   const [selectedShipperId, setSelectedShipperId] = useState<number>(shippers[0]?.id || 0);
@@ -63,9 +65,9 @@ export default function ShopPortalView({
     if (shippers.length && !shippers.some(shipper => shipper.id === selectedShipperId)) setSelectedShipperId(shippers[0].id);
   }, [shippers, selectedShipperId]);
 
-  // Shop filtered data
-  const shopProducts = products.filter(p => !p.shop_id || p.shop_id === currentUser.id);
-  const shopOrders = orders.filter(o => !o.shop_id || o.shop_id === currentUser.id);
+  // Shop filtered data (Strict isolation per shop)
+  const shopProducts = products.filter(p => p.shop_id === currentUser.id);
+  const shopOrders = orders.filter(o => o.shop_id === currentUser.id);
   const completedOrders = shopOrders.filter(o => o.status === 'Hoàn thành' || o.status === 'COMPLETED');
   const totalShopRevenue = completedOrders.reduce((sum, o) => sum + (o.total || 0), 0);
 
@@ -189,24 +191,6 @@ export default function ShopPortalView({
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-sm font-bold text-[#1e2d25]">Danh sách sản phẩm của Shop</h3>
-            <div className="flex gap-2">
-              {onAddCategory && (
-                <button
-                  onClick={onAddCategory}
-                  className="rounded-xl border border-[#176b52] bg-white px-3.5 py-2 text-xs font-bold text-[#176b52] shadow-sm hover:bg-emerald-50 transition"
-                >
-                  <FontAwesomeIcon icon={faPlus} className="mr-1.5" />
-                  Thêm danh mục
-                </button>
-              )}
-              <button
-                onClick={onAddProduct}
-                className="rounded-xl bg-[#176b52] px-4 py-2 text-xs font-bold text-white shadow hover:bg-[#125340] transition"
-              >
-                <FontAwesomeIcon icon={faPlus} className="mr-1.5" />
-                Thêm mặt hàng
-              </button>
-            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
@@ -250,59 +234,165 @@ export default function ShopPortalView({
       {/* Tab Content: ORDERS */}
       {activeTab === 'orders' && (
         <div className="space-y-4">
-          <h3 className="text-sm font-bold text-[#1e2d25]">Đơn hàng khách đặt tại Shop</h3>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-[#1e2d25]">Quản lý & Lịch sử Đơn hàng tại Shop</h3>
+              <p className="text-[11px] text-[#7d8f85]">Xác nhận đơn, đóng gói, bàn giao Điểm giao tập trung hoặc điều phối Shipper.</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { id: 'ALL', label: `Tất cả (${shopOrders.length})` },
+                { id: 'ACTIVE', label: `Đang xử lý (${shopOrders.filter(o => !['Hoàn thành', 'COMPLETED', 'Đã hủy', 'CANCELLED'].includes(o.status)).length})` },
+                { id: 'COMPLETED', label: `Đã hoàn thành (${completedOrders.length})` },
+                { id: 'CANCELLED', label: `Đã hủy (${shopOrders.filter(o => ['Đã hủy', 'CANCELLED'].includes(o.status)).length})` },
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setOrderStatusFilter(f.id as any)}
+                  className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
+                    orderStatusFilter === f.id
+                      ? 'bg-[#176b52] text-white shadow-sm'
+                      : 'bg-white border border-[#dce4de] text-[#526359] hover:bg-slate-50'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="space-y-3">
-            {shopOrders.map(order => (
-              <div
-                key={order.id}
-                className="flex flex-col justify-between rounded-2xl border border-[#e8ede8] bg-white p-4 shadow-sm md:flex-row md:items-center gap-4"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-[#1f2d25]">{order.id}</span>
-                    <span className="rounded-full bg-[#f0f5f2] px-2.5 py-0.5 text-[10px] font-bold text-[#176b52]">
-                      {order.status}
-                    </span>
-                  </div>
-                  <div className="text-xs text-[#627369]">
-                    Khách hàng: <b>{order.customer}</b> · Tổng tiền: <b className="text-[#176b52]">{money(order.total)}</b>
-                  </div>
-                  <div className="text-[11px] text-[#86968d]">
-                    Giao tới: {order.delivery_address || order.delivery}
-                  </div>
-                </div>
+            {shopOrders
+              .filter(o => {
+                if (orderStatusFilter === 'ACTIVE') return !['Hoàn thành', 'COMPLETED', 'Đã hủy', 'CANCELLED'].includes(o.status);
+                if (orderStatusFilter === 'COMPLETED') return ['Hoàn thành', 'COMPLETED'].includes(o.status);
+                if (orderStatusFilter === 'CANCELLED') return ['Đã hủy', 'CANCELLED'].includes(o.status);
+                return true;
+              })
+              .map(order => {
+                const isCentral = order.delivery === 'Điểm giao tập trung';
+                const canCancel = !['Hoàn thành', 'COMPLETED', 'Đã hủy', 'CANCELLED', 'Đang giao', 'DELIVERING'].includes(order.status);
+                return (
+                  <div
+                    key={order.id}
+                    className="flex flex-col justify-between rounded-2xl border border-[#e8ede8] bg-white p-4 shadow-sm md:flex-row md:items-center gap-4"
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/orders/${encodeURIComponent(order.id)}`}
+                          className="font-extrabold text-[#176b52] hover:underline"
+                        >
+                          #{order.id}
+                        </Link>
+                        <span className="rounded-full bg-[#f0f5f2] px-2.5 py-0.5 text-[10px] font-bold text-[#176b52]">
+                          {order.status}
+                        </span>
+                        <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${isCentral ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-blue-50 text-blue-700'}`}>
+                          {order.delivery}
+                        </span>
+                        <span className="text-[11px] text-slate-400">{order.date}</span>
+                      </div>
+                      <div className="text-xs text-[#627369]">
+                        Khách hàng: <b>{order.customer}</b> · Mặt hàng: <b>{order.items}</b> · Tổng tiền: <b className="text-[#176b52]">{money(order.total)}</b>
+                      </div>
+                      {order.lines && order.lines.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {order.lines.map((line, idx) => (
+                            <span key={idx} className="rounded-lg bg-[#f7faf8] border border-[#e6ede8] px-2 py-0.5 text-[11px] text-[#3a4d42]">
+                              {line.name} × <b>{line.quantity}</b> {line.unit}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="text-[11px] text-[#86968d]">
+                        {isCentral ? 'Nhận tại Điểm giao tập trung' : `Giao tới: ${order.delivery_address || order.delivery}`}
+                        {order.note ? ` · Ghi chú: ${order.note}` : ''}
+                      </div>
+                    </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  {['Chờ xác nhận', 'Chờ duyệt', 'PENDING'].includes(order.status) && (
-                    <button
-                      onClick={() => onUpdateOrderStatus(order.id, 'Đã xác nhận', 'Shop đã nhận đơn và chuẩn bị hàng')}
-                      className="rounded-xl bg-[#176b52] px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-[#125340]"
-                    >
-                      Xác nhận đơn
-                    </button>
-                  )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/orders/${encodeURIComponent(order.id)}`}
+                        className="rounded-xl border border-[#d2ddd5] bg-white px-3 py-2 text-xs font-bold text-[#33493d] hover:bg-slate-50"
+                      >
+                        Chi tiết & Lịch sử
+                      </Link>
 
-                  {['Đã xác nhận', 'CONFIRMED', 'APPROVED'].includes(order.status) && (
-                    <button
-                      onClick={() => onUpdateOrderStatus(order.id, 'Đang chuẩn bị', 'Shop đang đóng gói hàng')}
-                      className="rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-indigo-700"
-                    >
-                      Chuẩn bị hàng
-                    </button>
-                  )}
+                      {['Chờ xác nhận', 'Chờ duyệt', 'PENDING'].includes(order.status) && (
+                        <button
+                          onClick={() => onUpdateOrderStatus(order.id, 'Đã xác nhận', 'Shop đã xác nhận đơn hàng')}
+                          className="rounded-xl bg-[#176b52] px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-[#125340]"
+                        >
+                          Xác nhận đơn
+                        </button>
+                      )}
 
-                  {(order.status === 'Đang chuẩn bị' || order.status === 'PREPARING') && (
-                    <button
-                      onClick={() => setAssigningOrderId(order.apiId || null)}
-                      className="flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-amber-600"
-                    >
-                      <FontAwesomeIcon icon={faMotorcycle} />
-                      Gọi Shipper lấy hàng
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+                      {['Đã xác nhận', 'CONFIRMED', 'APPROVED'].includes(order.status) && (
+                        <button
+                          onClick={() => onUpdateOrderStatus(order.id, 'Đang chuẩn bị', 'Shop đang đóng gói nông sản')}
+                          className="rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-indigo-700"
+                        >
+                          Chuẩn bị hàng
+                        </button>
+                      )}
+
+                      {(order.status === 'Đang chuẩn bị' || order.status === 'PREPARING') && isCentral && (
+                        <>
+                          <button
+                            onClick={() => onUpdateOrderStatus(order.id, 'Chờ Shipper lấy hàng', 'Đã tập kết hàng tại Điểm giao tập trung chờ khách nhận')}
+                            className="rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-amber-600"
+                          >
+                            Sẵn sàng tại điểm tập trung
+                          </button>
+                          <button
+                            onClick={() => onUpdateOrderStatus(order.id, 'Hoàn thành', 'Đã bàn giao hàng cho khách tại Điểm giao tập trung')}
+                            className="rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-emerald-700"
+                          >
+                            Xác nhận đã giao tại điểm tập trung
+                          </button>
+                        </>
+                      )}
+
+                      {(order.status === 'Chờ Shipper lấy hàng' || order.status === 'READY_FOR_PICKUP') && isCentral && (
+                        <button
+                          onClick={() => onUpdateOrderStatus(order.id, 'Hoàn thành', 'Khách đã nhận hàng tại Điểm giao tập trung')}
+                          className="rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-emerald-700"
+                        >
+                          Khách đã nhận (Hoàn thành)
+                        </button>
+                      )}
+
+                      {(order.status === 'Đang chuẩn bị' || order.status === 'PREPARING') && !isCentral && (
+                        <>
+                          <button
+                            onClick={() => onUpdateOrderStatus(order.id, 'Chờ Shipper lấy hàng', 'Đơn sẵn sàng chờ Shipper nhận giao')}
+                            className="rounded-xl bg-teal-600 px-3 py-2 text-xs font-bold text-white shadow hover:bg-teal-700"
+                          >
+                            Đưa lên sàn Shipper
+                          </button>
+                          <button
+                            onClick={() => setAssigningOrderId(order.apiId || null)}
+                            className="flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-white shadow hover:bg-amber-600"
+                          >
+                            <FontAwesomeIcon icon={faMotorcycle} />
+                            Chỉ định Shipper
+                          </button>
+                        </>
+                      )}
+
+                      {canCancel && (
+                        <button
+                          onClick={() => onUpdateOrderStatus(order.id, 'Đã hủy', 'Cửa hàng hủy đơn hàng')}
+                          className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100"
+                        >
+                          Hủy đơn
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             {shopOrders.length === 0 && <div className="rounded-2xl border border-dashed p-10 text-center text-sm text-slate-500">Chưa có đơn hàng phát sinh.</div>}
           </div>
         </div>

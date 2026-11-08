@@ -15,6 +15,24 @@ class RegisterIn(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     customer_group: str = "STUDENT"
     role: str = "CUSTOMER"  # CUSTOMER, SHOP, SHIPPER
+    otp_code: str | None = None
+
+
+class RequestOtpIn(BaseModel):
+    target: str = Field(min_length=3, max_length=254)  # email or phone
+    purpose: str = "register"  # register, verify_email, verify_phone, forgot_password
+
+
+class VerifyOtpIn(BaseModel):
+    target: str = Field(min_length=3, max_length=254)
+    code: str = Field(min_length=4, max_length=8)
+    purpose: str = "register"
+
+
+class ResetPasswordIn(BaseModel):
+    target: str = Field(min_length=3, max_length=254)
+    code: str = Field(min_length=4, max_length=8)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class LoginIn(BaseModel):
@@ -25,6 +43,18 @@ class LoginIn(BaseModel):
 class ProfileUpdateIn(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     phone: str | None = Field(default=None, max_length=30)
+    shop_name: str | None = Field(default=None, max_length=150)
+    shop_description: str | None = Field(default=None, max_length=5000)
+    shop_address: str | None = Field(default=None, max_length=255)
+    vehicle_info: str | None = Field(default=None, max_length=100)
+
+
+class AdminUserUpdateIn(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=120)
+    phone: str | None = Field(default=None, max_length=30)
+    role: str | None = Field(default=None, pattern="^(ADMIN|SHOP|CUSTOMER|SHIPPER)$")
+    customer_group: str | None = Field(default=None, max_length=30)
+    is_active: bool | None = None
     shop_name: str | None = Field(default=None, max_length=150)
     shop_description: str | None = Field(default=None, max_length=5000)
     shop_address: str | None = Field(default=None, max_length=255)
@@ -44,6 +74,8 @@ class UserOut(ORMModel):
     role: str
     customer_group: str
     is_active: bool
+    is_email_verified: bool = False
+    is_phone_verified: bool = False
     shop_name: str | None = None
     shop_description: str | None = ""
     shop_address: str | None = ""
@@ -358,7 +390,7 @@ class PostOut(BaseModel):
 
 
 class ProductReviewIn(BaseModel):
-    product_id: int
+    product_id: int | None = None
     order_id: int | None = None
     rating: int = Field(ge=1, le=5)
     comment: str = ""
@@ -389,7 +421,7 @@ class ReviewReplyIn(BaseModel):
 
 
 class ShipperReviewIn(BaseModel):
-    order_id: int
+    order_id: int | None = None
     rating: int = Field(ge=1, le=5)
     attitude_rating: int = Field(default=5, ge=1, le=5)
     speed_rating: int = Field(default=5, ge=1, le=5)

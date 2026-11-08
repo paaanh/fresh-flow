@@ -224,7 +224,24 @@ def order_history_for_user(db: Session, order_id: int, user: User):
         raise HTTPException(404, "Không tìm thấy đơn hàng")
 
     check_order_access(order, user)
-    return repository.get_order_history(db, order_id)
+    history = repository.get_order_history(db, order_id)
+    out = []
+    for item in history:
+        actor = db.get(User, item.changed_by) if item.changed_by else None
+        out.append({
+            "id": item.id,
+            "order_id": item.order_id,
+            "changed_by": item.changed_by,
+            "actor_name": (actor.shop_name or actor.full_name) if actor else "Hệ thống",
+            "actor_role": actor.role if actor else "SYSTEM",
+            "old_status": item.old_status,
+            "new_status": item.new_status,
+            "from_status": item.old_status,
+            "to_status": item.new_status,
+            "note": item.note,
+            "created_at": item.created_at,
+        })
+    return out
 
 
 async def change_order_status(
@@ -240,16 +257,18 @@ async def change_order_status(
         new_status = "CONFIRMED"
 
     if operator.role == "SHOP":
-        if order.shop_id is not None and order.shop_id != operator.id:
-            raise HTTPException(403, "Bạn không có quyền cập nhật đơn hàng của Shop khác")
-        if order.shop_id is None:
-            order.shop_id = operator.id
+        if order.shop_id != operator.id:
+            raise HTTPException(403, "Bạn không có quyền cập nhật đơn hàng của Shop khác hoặc đơn hàng của sàn")
         allowed = {
-            "PENDING": {"CONFIRMED", "CANCELLED"},
-            "CONFIRMED": {"PREPARING", "CANCELLED"},
+            "PENDING": {"CONFIRMED", "PREPARING", "CANCELLED", "REJECTED"},
+            "CONFIRMED": {"PREPARING", "READY_FOR_PICKUP", "CANCELLED"},
             "PREPARING": {"READY_FOR_PICKUP", "CANCELLED"},
             "READY_FOR_PICKUP": {"CANCELLED"},
         }
+        if order.delivery_type in {"PICKUP", "CENTRAL"}:
+            allowed["CONFIRMED"].add("COMPLETED")
+            allowed["PREPARING"].add("COMPLETED")
+            allowed["READY_FOR_PICKUP"].add("COMPLETED")
         if new_status not in allowed.get(old_status, set()):
             raise HTTPException(409, "Trạng thái đơn hàng không thể được Shop cập nhật theo bước này")
     elif operator.role == "SHIPPER":
@@ -382,10 +401,8 @@ async def assign_shipper_to_order(
         raise HTTPException(404, "Không tìm thấy đơn hàng")
 
     if operator.role == "SHOP":
-        if order.shop_id is not None and order.shop_id != operator.id:
-            raise HTTPException(403, "Bạn không có quyền phân công đơn hàng của Shop khác")
-        if order.shop_id is None:
-            order.shop_id = operator.id
+        if order.shop_id != operator.id:
+            raise HTTPException(403, "Bạn không có quyền phân công đơn hàng của Shop khác hoặc đơn hàng của sàn")
     if operator.role == "SHIPPER":
         raise HTTPException(403, "Shipper không thể tự phân công đơn hàng")
 

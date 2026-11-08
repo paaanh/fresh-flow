@@ -78,6 +78,45 @@ export function ApiProfile() {
   const [success, setSuccess] = useState('');
   const [profileDraft, setProfileDraft] = useState({ full_name: '', phone: '', shop_name: '', shop_description: '', shop_address: '', vehicle_info: '' });
   const [draft, setDraft] = useState<AddressIn>({ label: 'Nhà', recipient: '', phone: '', line1: '', ward: '', district: '', city: '', is_default: false });
+  const [verifyModal, setVerifyModal] = useState<{ target: string; purpose: string; demoCode: string; code: string } | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+
+  const handleStartVerify = async (target: string, purpose: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await freshflow.requestOtp(target, purpose);
+      setVerifyModal({ target, purpose, demoCode: res.otp_code || '123456', code: '' });
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConfirmVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verifyModal || !verifyModal.code.trim()) return;
+    setVerifying(true);
+    setVerifyError('');
+    try {
+      await freshflow.verifyOtp(verifyModal.target, verifyModal.code.trim(), verifyModal.purpose);
+      if (user) {
+        if (verifyModal.purpose.includes('email') || verifyModal.target.includes('@')) {
+          setUser({ ...user, is_email_verified: true });
+        } else {
+          setUser({ ...user, is_phone_verified: true });
+        }
+      }
+      setSuccess(`Đã xác thực thành công ${verifyModal.target}!`);
+      setVerifyModal(null);
+    } catch (err) {
+      setVerifyError(message(err));
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -132,10 +171,46 @@ export function ApiProfile() {
     <div className="mx-auto max-w-3xl space-y-6">
       {user && (
         <section className="panel p-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-extrabold text-[#1a2d24]">{user.full_name}</h2>
-              <p className="text-xs text-[#7d8f85]">{user.email} · {user.phone || 'Chưa thêm SĐT'}</p>
+              <div className="mt-1 flex flex-wrap items-center gap-2.5 text-xs text-[#7d8f85]">
+                <div className="flex items-center gap-1.5">
+                  <span>{user.email}</span>
+                  {user.is_email_verified ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                      ✓ Đã xác thực email
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleStartVerify(user.email, 'verify_email')}
+                      className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 hover:bg-amber-200"
+                    >
+                      Xác thực email
+                    </button>
+                  )}
+                </div>
+                <span>·</span>
+                <div className="flex items-center gap-1.5">
+                  <span>{user.phone || 'Chưa thêm SĐT'}</span>
+                  {user.phone ? (
+                    user.is_phone_verified ? (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                        ✓ Đã xác thực SĐT
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void handleStartVerify(user.phone!, 'verify_phone')}
+                        className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 hover:bg-amber-200"
+                      >
+                        Xác thực SĐT
+                      </button>
+                    )
+                  ) : null}
+                </div>
+              </div>
             </div>
             <span className="rounded-full bg-[#e8f5ec] px-3 py-1 text-xs font-bold text-[#176b52]">
               Vai trò: {user.role === 'ADMIN' ? 'Quản trị viên' : user.role === 'SHOP' ? 'Cửa hàng (Shop)' : user.role === 'SHIPPER' ? 'Giao hàng (Shipper)' : 'Khách hàng'}
@@ -143,10 +218,17 @@ export function ApiProfile() {
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-4 rounded-xl bg-[#f8faf8] p-4 text-xs">
-            <div>
-              <span className="text-[#819287]">Nhóm khách hàng:</span>
-              <div className="font-bold text-[#1e2d25]">{user.customer_group}</div>
-            </div>
+            {user.role === 'CUSTOMER' ? (
+              <div>
+                <span className="text-[#819287]">Nhóm khách hàng:</span>
+                <div className="font-bold text-[#1e2d25]">{user.customer_group}</div>
+              </div>
+            ) : (
+              <div>
+                <span className="text-[#819287]">Trạng thái tài khoản:</span>
+                <div className="font-bold text-emerald-700">{user.is_active ? 'Đang hoạt động' : 'Tạm khóa'}</div>
+              </div>
+            )}
             {user.role === 'SHOP' && (
               <div>
                 <span className="text-[#819287]">Tên Shop:</span>
@@ -160,6 +242,8 @@ export function ApiProfile() {
               </div>
             )}
           </div>
+          {success && <p className="mt-3 text-xs text-emerald-700 bg-emerald-50 p-2.5 rounded-lg">{success}</p>}
+          {error && <p className="mt-3 text-xs text-rose-700 bg-rose-50 p-2.5 rounded-lg">{error}</p>}
           <form onSubmit={saveProfile} className="mt-4 space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-xs font-semibold text-slate-600">Họ và tên<input required minLength={2} maxLength={120} value={profileDraft.full_name} onChange={e => setProfileDraft({ ...profileDraft, full_name: e.target.value })} className={field} /></label>
@@ -176,44 +260,99 @@ export function ApiProfile() {
         </section>
       )}
 
-      <section className="panel p-6 space-y-4">
-        <h3 className="text-sm font-extrabold text-[#1a2d24]">Sổ địa chỉ nhận hàng</h3>
-        {success && <p className="text-xs text-emerald-700 bg-emerald-50 p-2.5 rounded-lg">{success}</p>}
-        {error && <p className="text-xs text-rose-700 bg-rose-50 p-2.5 rounded-lg">{error}</p>}
+      {user?.role === 'CUSTOMER' && (
+        <section className="panel p-6 space-y-4">
+          <h3 className="text-sm font-extrabold text-[#1a2d24]">Sổ địa chỉ nhận hàng</h3>
 
-        <div className="space-y-3">
-          {addresses.map(a => (
-            <div key={a.id} className="flex items-center justify-between rounded-xl border border-[#e8ede8] p-3.5 text-xs">
-              <div>
-                <div className="font-bold text-[#1e2d25]">
-                  {a.label} {a.is_default && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-[#176b52]">Mặc định</span>}
+          <div className="space-y-3">
+            {addresses.map(a => (
+              <div key={a.id} className="flex items-center justify-between rounded-xl border border-[#e8ede8] p-3.5 text-xs">
+                <div>
+                  <div className="font-bold text-[#1e2d25]">
+                    {a.label} {a.is_default && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-[#176b52]">Mặc định</span>}
+                  </div>
+                  <div className="mt-0.5 text-[#5e7065]">{addressText(a)} · {a.recipient} ({a.phone})</div>
                 </div>
-                <div className="mt-0.5 text-[#5e7065]">{addressText(a)} · {a.recipient} ({a.phone})</div>
+                <button onClick={() => removeAddress(a.id)} className="text-xs text-rose-600 hover:underline">Xóa</button>
               </div>
-              <button onClick={() => removeAddress(a.id)} className="text-xs text-rose-600 hover:underline">Xóa</button>
-            </div>
-          ))}
-          {addresses.length === 0 && <p className="text-xs text-[#809187]">Bạn chưa lưu địa chỉ nào.</p>}
-        </div>
-
-        <form onSubmit={addAddress} className="mt-4 border-t border-[#f0f4f1] pt-4 space-y-3">
-          <h4 className="text-xs font-bold text-[#3d5045]">Thêm địa chỉ mới</h4>
-          <div className="grid grid-cols-2 gap-3">
-            <input required placeholder="Tên gợi nhớ (Nhà, Cơ quan...)" value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} className={field} />
-            <input required placeholder="Người nhận" value={draft.recipient} onChange={e => setDraft({ ...draft, recipient: e.target.value })} className={field} />
-            <input required placeholder="Số điện thoại" value={draft.phone} onChange={e => setDraft({ ...draft, phone: e.target.value })} className={field} />
-            <input required placeholder="Số nhà, đường" value={draft.line1} onChange={e => setDraft({ ...draft, line1: e.target.value })} className={field} />
-            <input placeholder="Phường/Xã" value={draft.ward} onChange={e => setDraft({ ...draft, ward: e.target.value })} className={field} />
-            <input placeholder="Quận/Huyện" value={draft.district} onChange={e => setDraft({ ...draft, district: e.target.value })} className={field} />
-            <input required placeholder="Tỉnh/Thành phố" value={draft.city} onChange={e => setDraft({ ...draft, city: e.target.value })} className={field} />
-            <label className="flex items-center gap-2 text-xs text-[#526359] self-center">
-              <input type="checkbox" checked={draft.is_default} onChange={e => setDraft({ ...draft, is_default: e.target.checked })} />
-              Đặt làm mặc định
-            </label>
+            ))}
+            {addresses.length === 0 && <p className="text-xs text-[#809187]">Bạn chưa lưu địa chỉ nào.</p>}
           </div>
-          <button type="submit" disabled={busy} className={button}>{busy ? 'Đang lưu…' : 'Thêm địa chỉ'}</button>
-        </form>
-      </section>
+
+          <form onSubmit={addAddress} className="mt-4 border-t border-[#f0f4f1] pt-4 space-y-3">
+            <h4 className="text-xs font-bold text-[#3d5045]">Thêm địa chỉ mới</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <input required placeholder="Tên gợi nhớ (Nhà, Cơ quan...)" value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} className={field} />
+              <input required placeholder="Người nhận" value={draft.recipient} onChange={e => setDraft({ ...draft, recipient: e.target.value })} className={field} />
+              <input required placeholder="Số điện thoại" value={draft.phone} onChange={e => setDraft({ ...draft, phone: e.target.value })} className={field} />
+              <input required placeholder="Số nhà, đường" value={draft.line1} onChange={e => setDraft({ ...draft, line1: e.target.value })} className={field} />
+              <input placeholder="Phường/Xã" value={draft.ward} onChange={e => setDraft({ ...draft, ward: e.target.value })} className={field} />
+              <input placeholder="Quận/Huyện" value={draft.district} onChange={e => setDraft({ ...draft, district: e.target.value })} className={field} />
+              <input required placeholder="Tỉnh/Thành phố" value={draft.city} onChange={e => setDraft({ ...draft, city: e.target.value })} className={field} />
+              <label className="flex items-center gap-2 text-xs text-[#526359] self-center">
+                <input type="checkbox" checked={draft.is_default} onChange={e => setDraft({ ...draft, is_default: e.target.checked })} />
+                Đặt làm mặc định
+              </label>
+            </div>
+            <button type="submit" disabled={busy} className={button}>{busy ? 'Đang lưu…' : 'Thêm địa chỉ'}</button>
+          </form>
+        </section>
+      )}
+
+      {/* Modal Xác thực OTP */}
+      {verifyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="text-base font-extrabold text-[#1a2d24]">
+              Xác thực {verifyModal.target.includes('@') ? 'Email' : 'Số điện thoại'}
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Nhập mã OTP 6 chữ số gửi đến: <b>{verifyModal.target}</b>
+            </p>
+
+            {verifyModal.demoCode && (
+              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-center text-xs text-emerald-900">
+                <span className="text-[10px] text-slate-500 block uppercase font-bold">Mã xác thực thử nghiệm</span>
+                <span className="font-mono text-base font-extrabold tracking-widest text-[#176b52]">
+                  {verifyModal.demoCode}
+                </span>
+              </div>
+            )}
+
+            {verifyError && (
+              <p className="mt-3 rounded-lg bg-rose-50 p-2.5 text-xs text-rose-700">{verifyError}</p>
+            )}
+
+            <form onSubmit={handleConfirmVerify} className="mt-4 space-y-3">
+              <input
+                required
+                maxLength={8}
+                value={verifyModal.code}
+                onChange={e => setVerifyModal({ ...verifyModal, code: e.target.value })}
+                placeholder="Nhập mã 6 số..."
+                className="w-full rounded-xl border border-[#d2ddd5] p-3 text-center font-mono text-lg font-bold tracking-widest outline-none focus:border-[#176b52]"
+              />
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setVerifyModal(null)}
+                  className="rounded-xl border border-[#d2ddd5] px-4 py-2 text-xs font-semibold text-slate-600"
+                >
+                  Đóng
+                </button>
+                <button
+                  type="submit"
+                  disabled={verifying}
+                  className="rounded-xl bg-[#176b52] px-5 py-2 text-xs font-bold text-white shadow hover:bg-[#125340] disabled:opacity-50"
+                >
+                  {verifying ? 'Đang xác thực…' : 'Xác nhận OTP'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

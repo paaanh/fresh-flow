@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from app.schemas import NotificationOut, BroadcastNotificationIn
 from sqlalchemy.orm import Session
 from app.models import User
-from app.api.deps import get_current_user, get_db, require_admin
+from app.api.deps import get_current_user, get_db, require_admin_or_shop
 from app.modules.notifications import service
 
 router = APIRouter()
@@ -16,9 +16,10 @@ def mark_notification_read(notification_id: int, db: Session=Depends(get_db), us
     return service.mark_notification_read(notification_id=notification_id, db=db, user=user)
 
 @router.post('/admin/notifications/broadcast', status_code=201)
+@router.post('/notifications/broadcast', status_code=201)
 async def broadcast_notification(
     payload: BroadcastNotificationIn,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    operator: User = Depends(require_admin_or_shop),
 ):
-    return await service.broadcast_notification(payload=payload, db=db, admin=admin)
+    return await service.broadcast_notification(payload=payload, db=db, admin=operator)

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 
-from app.api.deps import get_db, get_current_user, require_admin, require_shop
+from app.api.deps import get_db, get_current_user, require_admin, require_admin_or_shop, require_shop
 from app.models import ProductReview, ShipperReview, Order, OrderItem, Product, User, ModerationTerm, ModerationViolation
 from app.schemas import (
     ProductReviewIn,
@@ -41,6 +41,54 @@ def list_shop_reviews(db: Session = Depends(get_db), shop: User = Depends(requir
         .order_by(ProductReview.created_at.desc())
     ).all()
     return [enrich_review(db, review) for review in reviews]
+
+
+@router.get("/orders/{order_id}/reviews")
+def get_order_reviews(order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    order = db.get(Order, order_id)
+    if not order:
+        raise HTTPException(404, "Không tìm thấy đơn hàng")
+    product_ids = list(db.scalars(select(OrderItem.product_id).where(OrderItem.order_id == order_id)).all())
+    prod_revs = []
+    if product_ids:
+        prod_revs = db.scalars(
+            select(ProductReview)
+            .where(
+                ProductReview.product_id.in_(product_ids),
+                ProductReview.user_id == order.user_id,
+                ProductReview.is_hidden == False,
+            )
+            .order_by(ProductReview.created_at.desc())
+        ).all()
+    ship_revs = db.scalars(
+        select(ShipperReview)
+        .where(ShipperReview.order_id == order_id)
+        .order_by(ShipperReview.created_at.desc())
+    ).all()
+    return {
+        "product_reviews": [
+            {
+                **enrich_review(db, r).model_dump(),
+                "product_name": db.get(Product, r.product_id).name if db.get(Product, r.product_id) else f"Sản phẩm #{r.product_id}",
+            }
+            for r in prod_revs
+        ],
+        "shipper_reviews": [
+            {
+                "id": s.id,
+                "shipper_id": s.shipper_id,
+                "shipper_name": db.get(User, s.shipper_id).full_name if db.get(User, s.shipper_id) else "Tài xế",
+                "user_id": s.user_id,
+                "order_id": s.order_id,
+                "rating": s.rating,
+                "attitude_rating": s.attitude_rating,
+                "speed_rating": s.speed_rating,
+                "comment": s.comment,
+                "created_at": s.created_at,
+            }
+            for s in ship_revs
+        ],
+    }
 
 
 @router.get("/products/{product_id}/reviews", response_model=list[ProductReviewOut])
@@ -112,14 +160,14 @@ def reply_to_review(
     review_id: int,
     payload: ReviewReplyIn,
     db: Session = Depends(get_db),
-    user: User = Depends(require_shop),
+    user: User = Depends(require_admin_or_shop),
 ):
     rev = db.get(ProductReview, review_id)
     if not rev:
         raise HTTPException(404, "Không tìm thấy đánh giá")
 
     product = db.get(Product, rev.product_id)
-    if user.role != "ADMIN" and product and product.shop_id != user.id:
+    if user.role != "ADMIN" and product and product.shop_id is not None and product.shop_id != user.id:
         raise HTTPException(403, "Bạn không có quyền trả lời đánh giá của Shop khác")
 
     rev.shop_reply = payload.reply

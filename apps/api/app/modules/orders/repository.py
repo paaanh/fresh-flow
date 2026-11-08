@@ -32,7 +32,7 @@ def list_orders(
     if user.role == "CUSTOMER":
         query = query.where(Order.user_id == user.id)
     elif user.role == "SHOP":
-        query = query.where(or_(Order.shop_id == user.id, Order.shop_id.is_(None)))
+        query = query.where(Order.shop_id == user.id)
     elif user.role == "SHIPPER":
         query = query.where(or_(Order.shipper_id == user.id, Order.status.in_(["READY_FOR_PICKUP", "PICKED_UP", "DELIVERING"])))
 

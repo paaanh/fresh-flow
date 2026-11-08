@@ -292,8 +292,13 @@ def main() -> None:
             ensure_price(db, product, "STUDENT", student_price)
             ensure_price(db, product, "WORKING", worker_price)
 
-        student_slot = ensure_slot(db, "Điểm giao khu A · 11:30", "STUDENT", "0")
-        worker_slot = ensure_slot(db, "Giao tận nơi · 17:00", "WORKING", "15000")
+        student_slot = ensure_slot(db, "Điểm giao tập trung KTX Khu A · 11:30 - 12:30", "ALL", "0")
+        ensure_slot(db, "Điểm giao tập trung KTX Khu B · 17:00 - 18:30", "ALL", "0")
+        ensure_slot(db, "Giao tận nơi buổi sáng · 07:30 - 09:30", "ALL", "15000")
+        worker_slot = ensure_slot(db, "Giao tận nơi buổi chiều · 16:30 - 18:30", "ALL", "15000")
+        ensure_slot(db, "Giao tận nơi buổi trưa · 11:30 - 13:00", "ALL", "15000")
+        ensure_slot(db, "Giao tận nơi buổi tối · 19:00 - 20:30", "ALL", "20000")
+        ensure_slot(db, "Giao định kỳ Văn phòng / Công sở · 08:30 - 09:30", "WORKING", "0")
         ensure_address(db, student, "Ký túc xá", student.full_name, student.phone or "0900000102", "Khu A, Đại học Quốc gia")
         ensure_address(db, worker, "Nhà", worker.full_name, worker.phone or "0900000103", "12 Nguyễn Huệ")
 

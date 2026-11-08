@@ -28,13 +28,12 @@ import { OrderDetailView, OrderTable, OrdersView } from '@/features/customer/pag
 import { RequestsView } from '@/features/customer/pages/requests';
 import { Help, GuidePage } from '@/features/customer/pages/help';
 import { Cart } from '@/features/customer/pages/cart';
-import { CheckoutPanel } from '@/features/customer/pages/checkout';
 import ProductPhoto from '@/components/product-photo';
 import GlobalSearch from '@/components/global-search';
 import { normalizeSearch } from '@/lib/search';
 import { api, unwrapList, freshflow, authToken } from '@/lib/api';
 import { allocateOrderItems } from '@/lib/order-payload';
-import { ApiProfile, ApiCheckout, ApiDashboard, type CheckoutDetails } from '@/features/api-panels';
+import { ApiProfile, ApiCheckout, type CheckoutDetails } from '@/features/api-panels';
 import { RealtimeClient } from '@/lib/realtime';
 import { usePersistentState } from '@/hooks/use-persistent-state';
 import type {
@@ -94,7 +93,7 @@ export default function FreshFlow() {
   const [categoryDraft, setCategoryDraft] = useState({ name: '', description: '' });
   const [categoryBusy, setCategoryBusy] = useState(false);
   const [modal, setModal] = useState('');
-  const [requestDraft, setRequestDraft] = useState({ name: '', description: '' });
+  const [requestDraft, setRequestDraft] = useState({ name: '', category: 'Rau củ', quantity: '2 kg', description: '' });
   const [requestBusy, setRequestBusy] = useState(false);
   const [activeTab, setActiveTab] = useState('Tất cả');
   const [notifications, setNotifications] = useState<{ id: number; title: string; body: string; event_type: string; is_read: boolean; created_at?: string }[]>([]);
@@ -394,20 +393,38 @@ export default function FreshFlow() {
     return true;
   };
 
-  const updateRequest = async (id: number, status: string, quotedPrice?: number) => {
+  const updateRequest = async (id: number, status: string, quotedPrice?: number, responseNote?: string) => {
+    const apiStatus =
+      status === 'Đã báo giá'
+        ? 'QUOTED'
+        : status === 'Đang xử lý'
+          ? 'ACCEPTED'
+          : status === 'Hoàn tất'
+            ? 'FULFILLED'
+            : status === 'Từ chối'
+              ? 'REJECTED'
+              : status;
+    const finalNote =
+      responseNote ||
+      (quotedPrice ? `Đã có nguồn hàng, giá dự kiến ${money(quotedPrice)}` : 'Đã cập nhật tiến độ xử lý yêu cầu');
     if (apiState === 'live') {
       try {
-        await api.patch(`/admin/product-requests/${id}`, {
-          status: status === 'Đã báo giá' ? 'QUOTED' : status,
+        const updated = await api.patch<any>(`/admin/product-requests/${id}`, {
+          status: apiStatus,
           quoted_price: quotedPrice,
-          admin_response: quotedPrice ? `Đã có nguồn hàng, giá dự kiến ${money(quotedPrice)}` : 'Đã duyệt yêu cầu',
+          admin_response: finalNote,
         });
+        setRequests(current => current.map(r => (r.id === id ? normalizeRequest(updated) : r)));
+        notify('Đã cập nhật yêu cầu mặt hàng.');
+        return;
       } catch (error) {
         notify(error instanceof Error ? error.message : 'Không cập nhật được yêu cầu');
         return;
       }
     }
-    setRequests(current => current.map(r => (r.id === id ? { ...r, status } : r)));
+    setRequests(current =>
+      current.map(r => (r.id === id ? { ...r, status, quoted_price: quotedPrice ?? r.quoted_price, admin_response: finalNote } : r))
+    );
     notify('Đã cập nhật yêu cầu mặt hàng.');
   };
 
@@ -882,7 +899,9 @@ export default function FreshFlow() {
               </div>
               <div className="hidden text-left sm:block">
                 <div className="text-xs font-bold text-[#1f2d25]">{currentUser?.full_name || 'Khách hàng'}</div>
-                <div className="text-[10px] text-[#8c9890]">{currentUser?.customer_group || 'Nhóm sinh viên'}</div>
+                <div className="text-[10px] text-[#8c9890]">
+                  {admin ? 'Quản trị viên' : shop ? (currentUser?.shop_name || 'Cửa hàng (Shop)') : shipper ? 'Tài xế (Shipper)' : (currentUser?.customer_group || 'Nhóm sinh viên')}
+                </div>
               </div>
             </button>
           </div>
@@ -1055,6 +1074,7 @@ export default function FreshFlow() {
           {page === 'requests' && (
             <RequestsView
               admin={admin}
+              shop={shop}
               requests={requests}
               notify={notify}
               open={() => setModal('request')}
@@ -1072,7 +1092,7 @@ export default function FreshFlow() {
           {page === 'settings' && <SettingsView />}
 
           {/* HELP & GUIDES */}
-          {page === 'help' && <Help />}
+          {page === 'help' && <Help onOpenChat={() => openChatWith()} />}
           {page === 'order-guide' && <GuidePage type="orders" />}
           {page === 'delivery-guide' && <GuidePage type="delivery" />}
 
@@ -1085,13 +1105,14 @@ export default function FreshFlow() {
           )}
 
           {page === 'notifications' && (
-            admin ? (
+            admin || shop ? (
               <AdminNotificationsView
                 notifications={notifications}
                 notify={notify}
                 onReload={() => setReload(r => r + 1)}
                 markRead={markNotificationRead}
                 clearAll={clearNotifications}
+                senderRole={admin ? 'ADMIN' : 'SHOP'}
               />
             ) : (
               <section className="space-y-3">
@@ -1148,9 +1169,11 @@ export default function FreshFlow() {
               order={detailOrder}
               statusTone={statusTone}
               money={money}
-              admin={admin && isAdminRoute}
+              admin={admin}
+              shop={shop}
               updateStatus={changeOrderStatus}
-              go={path => router.push(admin && isAdminRoute ? `/admin${path}` : path)}
+              notify={notify}
+              go={path => router.push(admin && isAdminRoute ? `/admin${path}` : shop ? '/shop/orders' : path)}
             />
           )}
         </div>
@@ -1322,10 +1345,24 @@ export default function FreshFlow() {
                 e.preventDefault();
                 if (!requestDraft.name.trim()) return;
                 setRequestBusy(true);
+                const fullDescription = `Danh mục: ${requestDraft.category || 'Nông sản'}; Số lượng: ${requestDraft.quantity || '1 phần'}${requestDraft.description.trim() ? `. ${requestDraft.description.trim()}` : ''}`;
                 try {
-                  const created = await freshflow.createRequest<any>(requestDraft.name.trim(), requestDraft.description.trim());
-                  setRequests(current => [normalizeRequest(created), ...current]);
-                  setRequestDraft({ name: '', description: '' });
+                  if (apiState === 'live') {
+                    const created = await freshflow.createRequest<any>(requestDraft.name.trim(), fullDescription);
+                    setRequests(current => [normalizeRequest(created), ...current]);
+                  } else {
+                    setRequests(current => [
+                      normalizeRequest({
+                        id: Date.now(),
+                        product_name: requestDraft.name.trim(),
+                        description: fullDescription,
+                        status: 'OPEN',
+                        created_at: new Date().toISOString(),
+                      }),
+                      ...current,
+                    ]);
+                  }
+                  setRequestDraft({ name: '', category: 'Rau củ', quantity: '2 kg', description: '' });
                   setModal('');
                   notify('Đã gửi yêu cầu mặt hàng thành công!');
                 } catch (err: any) {
@@ -1348,12 +1385,38 @@ export default function FreshFlow() {
                   className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-[#3d5045]">Danh mục nông sản</label>
+                  <select
+                    value={requestDraft.category}
+                    onChange={e => setRequestDraft(d => ({ ...d, category: e.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-[#d2ddd5] bg-white p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                  >
+                    {Array.from(new Set(['Rau củ', 'Trái cây', 'Thực phẩm', ...categories.map(c => c.name)])).map(cat => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-[#3d5045]">Số lượng dự kiến *</label>
+                  <input
+                    required
+                    placeholder="Ví dụ: 5 kg, 10 bó..."
+                    value={requestDraft.quantity}
+                    onChange={e => setRequestDraft(d => ({ ...d, quantity: e.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                  />
+                </div>
+              </div>
               <div>
-                <label className="text-xs font-bold text-[#3d5045]">Mô tả chi tiết & Số lượng dự kiến</label>
+                <label className="text-xs font-bold text-[#3d5045]">Mô tả yêu cầu thêm (xuất xứ, thời gian nhận)</label>
                 <textarea
                   rows={3}
                   maxLength={2000}
-                  placeholder="Nhu cầu 5kg tuần sau, tiêu chuẩn hữu cơ..."
+                  placeholder="Tiêu chuẩn VietGAP/hữu cơ, thời gian mong muốn nhận hàng..."
                   value={requestDraft.description}
                   onChange={e => setRequestDraft(d => ({ ...d, description: e.target.value }))}
                   className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"

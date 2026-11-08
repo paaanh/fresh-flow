@@ -33,6 +33,11 @@ def init_database():
             conn.execute(text("ALTER TABLE users ADD COLUMN avatar_url VARCHAR(500)"))
         if "vehicle_info" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN vehicle_info VARCHAR(100) DEFAULT ''"))
+        if "is_email_verified" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_email_verified BOOLEAN DEFAULT 0"))
+        if "is_phone_verified" not in user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_phone_verified BOOLEAN DEFAULT 0"))
+        conn.execute(text("UPDATE users SET is_email_verified = 1, is_phone_verified = 1 WHERE is_email_verified = 0 OR is_phone_verified = 0"))
 
         # Categories columns
         cat_cols = {col["name"] for col in inspector.get_columns("categories")}
@@ -110,5 +115,20 @@ def seed_core_configuration(db: Session):
     vat = db.scalar(select(models.VatConfig).where(models.VatConfig.tax_name == "VAT"))
     if not vat:
         db.add(models.VatConfig(tax_name="VAT", rate=Decimal("0.0800"), is_active=True))
+
+    # Delivery slots
+    default_slots = [
+        ("Điểm giao tập trung KTX Khu A · 11:30 - 12:30", "ALL", Decimal("0.00")),
+        ("Điểm giao tập trung KTX Khu B · 17:00 - 18:30", "ALL", Decimal("0.00")),
+        ("Giao tận nơi buổi sáng · 07:30 - 09:30", "ALL", Decimal("15000.00")),
+        ("Giao tận nơi buổi trưa · 11:30 - 13:00", "ALL", Decimal("15000.00")),
+        ("Giao tận nơi buổi chiều · 16:30 - 18:30", "ALL", Decimal("15000.00")),
+        ("Giao tận nơi buổi tối · 19:00 - 20:30", "ALL", Decimal("20000.00")),
+        ("Giao định kỳ Văn phòng / Công sở · 08:30 - 09:30", "WORKING", Decimal("0.00")),
+    ]
+    for s_name, s_group, s_fee in default_slots:
+        slot = db.scalar(select(models.DeliverySlot).where(models.DeliverySlot.name == s_name))
+        if not slot:
+            db.add(models.DeliverySlot(name=s_name, customer_group=s_group, fee=s_fee, is_active=True))
 
     db.commit()

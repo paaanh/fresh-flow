@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.models import User
-from app.schemas import ProfileUpdateIn, UserOut
+from app.schemas import AdminUserUpdateIn, ProfileUpdateIn, UserOut
 from app.api.deps import get_db, require_admin, get_current_user
 from app.modules.users import service
 
@@ -13,6 +13,16 @@ router = APIRouter()
 @router.get("/admin/users", response_model=list[UserOut])
 def admin_users(search: str | None = None, db: Session = Depends(get_db), _: User = Depends(require_admin)):
     return service.admin_users(search=search, db=db, _=_)
+
+
+@router.patch("/admin/users/{user_id}", response_model=UserOut)
+def admin_update_user(
+    user_id: int,
+    payload: AdminUserUpdateIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return service.admin_update_user(user_id=user_id, payload=payload, db=db, admin=admin)
 
 
 @router.patch("/admin/users/{user_id}/status", response_model=UserOut)
