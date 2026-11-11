@@ -506,3 +506,84 @@ def test_shop_data_isolation(audit_client: TestClient):
         json={"reply": "Cảm ơn quý khách!"},
     )
     assert cross_reply.status_code == 403
+
+
+def test_two_orders_insufficient_stock_competition_and_post_inline_products(audit_client: TestClient):
+    """
+    Test:
+    1. When 2 orders are placed for a product batch with limited stock (e.g., 5 units),
+       and Order 1 requests 3 units while Order 2 requests 4 units:
+       - Both orders succeed in PENDING state.
+       - Confirming Order 1 succeeds and reserves 3 units (leaving 2 available).
+       - Confirming Order 2 fails with 409 Conflict because 4 > 2 available!
+    2. Creating a Newfeed post with inline new_products automatically creates Products + InventoryBatches + PriceRules.
+    """
+    client = audit_client
+    admin_headers = auth_header(client, "admin@freshflow.vn", "AdminPass123!")
+
+    # Create a post with 2 inline new products
+    post_res = client.post(
+        "/api/v1/posts",
+        headers=admin_headers,
+        json={
+            "title": "Combo nông sản thu hoạch sáng nay",
+            "content": "Rau củ quả sạch tươi mới",
+            "post_type": "DAILY_SPECIAL",
+            "image_urls": "https://images.unsplash.com/photo-1540420773420-3366772f4999\nhttps://images.unsplash.com/photo-1518843875459-f738682238a6",
+            "sale_price": 45000,
+            "group_prices": '{"STUDENT": 39000, "WORKING": 42000}',
+            "new_products": [
+                {
+                    "name": "Dâu tây giống Nhật",
+                    "category_name": "Trái cây",
+                    "unit": "hộp",
+                    "base_price": 50000,
+                    "stock": 5,
+                },
+                {
+                    "name": "Măng tây hữu cơ",
+                    "category_name": "Rau củ",
+                    "unit": "bó",
+                    "base_price": 40000,
+                    "stock": 8,
+                },
+            ],
+        },
+    )
+    assert post_res.status_code == 201
+    post_data = post_res.json()
+    assert len(post_data["product_ids"]) == 2
+    assert len(post_data["products_info"]) == 2
+
+    strawberry_id = post_data["product_ids"][0]
+    catalog_products = client.get("/api/v1/products").json()
+    catalog_names = [p["name"] for p in catalog_products]
+    assert "Dâu tây giống Nhật" in catalog_names
+    assert "Măng tây hữu cơ" in catalog_names
+    assert catalog_products[0]["id"] == post_data["product_ids"][1]
+
+    batches = client.get(f"/api/v1/admin/products/{strawberry_id}/batches", headers=admin_headers).json()
+    assert len(batches) == 1
+    batch_id = batches[0]["id"]
+    assert Decimal(str(batches[0]["initial_quantity"])) == Decimal("5")
+
+    # Register 2 customers
+    client.post("/api/v1/auth/register", json={"email": "buyer1@stock.vn", "full_name": "Khách 1", "password": "Password123!"})
+    client.post("/api/v1/auth/register", json={"email": "buyer2@stock.vn", "full_name": "Khách 2", "password": "Password123!"})
+    h1 = auth_header(client, "buyer1@stock.vn", "Password123!")
+    h2 = auth_header(client, "buyer2@stock.vn", "Password123!")
+
+    # Both place orders while batch has 5 available (3 + 4 = 7 > 5)
+    ord1 = client.post("/api/v1/orders", headers=h1, json={"items": [{"batch_id": batch_id, "quantity": 3}], "delivery_type": "PICKUP"})
+    ord2 = client.post("/api/v1/orders", headers=h2, json={"items": [{"batch_id": batch_id, "quantity": 4}], "delivery_type": "PICKUP"})
+    assert ord1.status_code == 201
+    assert ord2.status_code == 201
+
+    # Admin confirms Order 1 -> succeeds (approved_quantity becomes 3, available becomes 2)
+    confirm1 = client.patch(f"/api/v1/admin/orders/{ord1.json()['id']}/status", headers=admin_headers, json={"status": "CONFIRMED"})
+    assert confirm1.status_code == 200
+
+    # Admin tries to confirm Order 2 -> fails with 409 Conflict because only 2 units remain (< 4 requested)
+    confirm2 = client.patch(f"/api/v1/admin/orders/{ord2.json()['id']}/status", headers=admin_headers, json={"status": "CONFIRMED"})
+    assert confirm2.status_code == 409
+

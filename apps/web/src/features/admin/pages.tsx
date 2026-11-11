@@ -862,20 +862,33 @@ export function AdminNotificationsView({
   onReload,
   markRead,
   clearAll,
+  onNavigate,
   senderRole = 'ADMIN',
 }: {
-  notifications: { id: number; title: string; body: string; event_type: string; is_read: boolean; created_at?: string }[];
+  notifications: { id: number; title: string; body: string; event_type: string; is_read: boolean; link?: string; created_at?: string }[];
   notify: (msg: string) => void;
   onReload?: () => void;
   markRead: (id: number) => Promise<void>;
   clearAll: () => Promise<void>;
+  onNavigate?: (link: string) => void;
   senderRole?: 'ADMIN' | 'SHOP';
 }) {
+  const [activeTab, setActiveTab] = useState<'inbox' | 'create'>('inbox');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
   const [targetRole, setTargetRole] = useState<'ALL' | 'CUSTOMER' | 'SHOP' | 'SHIPPER'>(senderRole === 'SHOP' ? 'CUSTOMER' : 'ALL');
   const [busy, setBusy] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  const resolveNotificationLink = (item: { event_type: string; link?: string }) => {
+    if (item.link) return item.link;
+    if (item.event_type?.startsWith('order.')) return senderRole === 'SHOP' ? '/shop/orders' : '/orders';
+    if (item.event_type?.startsWith('product_request.')) return '/requests';
+    if (item.event_type?.startsWith('chat.')) return '/chat';
+    return '/newfeed';
+  };
 
   const handleBroadcast = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -887,12 +900,14 @@ export function AdminNotificationsView({
         title: title.trim(),
         body: body.trim(),
         target_role: targetRole === 'ALL' ? null : targetRole,
-      });
+        link: linkUrl.trim() || '/newfeed',
+      } as any);
       const msg = res?.message || 'Đã gửi thông báo đến toàn bộ người dùng.';
       setSuccessMsg(msg);
       notify(msg);
       setTitle('');
       setBody('');
+      setLinkUrl('');
       onReload?.();
     } catch (err: any) {
       notify(err?.message || 'Không thể gửi thông báo.');
@@ -902,144 +917,207 @@ export function AdminNotificationsView({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Broadcast Form Panel */}
-      <section className="panel p-6 space-y-5">
-        <div className="border-b border-[#f0f4f1] pb-3">
-          <h2 className="text-base font-extrabold text-[#1e2e26]">
-            {senderRole === 'SHOP' ? 'Tạo thông báo từ Cửa hàng (Shop)' : 'Gửi thông báo toàn hệ thống'}
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            {senderRole === 'SHOP'
-              ? 'Gửi thông báo ưu đãi nông sản mới, lịch thu hoạch hoặc thông tin đơn hàng đến khách hàng.'
-              : 'Phát thông báo đẩy đến tất cả người dùng hoặc lọc theo vai trò (Khách hàng, Cửa hàng, Tài xế).'}
-          </p>
-        </div>
-
-        {successMsg && (
-          <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs font-semibold text-emerald-800">
-            {successMsg}
-          </div>
-        )}
-
-        <form onSubmit={handleBroadcast} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-[#3d5045] mb-1">Đối tượng nhận thông báo</label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              {[
-                { id: 'ALL', label: 'Tất cả người dùng' },
-                { id: 'CUSTOMER', label: 'Chỉ Khách hàng' },
-                { id: 'SHOP', label: 'Chỉ Cửa hàng (Shop)' },
-                { id: 'SHIPPER', label: 'Chỉ Tài xế (Shipper)' },
-              ].map(opt => (
-                <label
-                  key={opt.id}
-                  className={`flex items-center gap-2 rounded-xl border p-2.5 cursor-pointer text-xs font-semibold ${
-                    targetRole === opt.id
-                      ? 'border-[#176b52] bg-[#f4f9f6] text-[#176b52]'
-                      : 'border-[#e8ede8] text-[#55695f] hover:bg-slate-50'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="targetRole"
-                    checked={targetRole === opt.id}
-                    onChange={() => setTargetRole(opt.id as any)}
-                  />
-                  <span>{opt.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-[#3d5045] mb-1">Tiêu đề thông báo *</label>
-            <input
-              required
-              minLength={2}
-              maxLength={160}
-              placeholder="Ví dụ: Lịch bảo trì hệ thống hoặc Ưu đãi nông sản hôm nay..."
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              className="w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-[#3d5045] mb-1">Nội dung chi tiết *</label>
-            <textarea
-              required
-              minLength={2}
-              maxLength={2000}
-              rows={3}
-              placeholder="Nội dung thông báo gửi đến người dùng..."
-              value={body}
-              onChange={e => setBody(e.target.value)}
-              className="w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
-            />
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-xl bg-[#176b52] px-6 py-2.5 text-xs font-bold text-white shadow-md hover:bg-[#125340] disabled:opacity-50"
-            >
-              {busy ? 'Đang gửi thông báo…' : 'Phát thông báo ngay'}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      {/* Notifications List */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-[#1e2e26]">Hộp thư thông báo của bạn</h3>
-            <p className="text-[11px] text-slate-400">Xem và quản lý các thông báo nhận được</p>
-          </div>
-          <button onClick={() => void clearAll()} className="text-xs font-bold text-[#176b52] hover:underline">
-            Đánh dấu tất cả đã đọc
+    <div className="space-y-5">
+      {/* Tách 2 Tab: Hộp thư thông báo nhận được & Tạo thông báo mới */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e5ebe5] pb-3">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('inbox')}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition ${
+              activeTab === 'inbox'
+                ? 'bg-[#176b52] text-white shadow-sm'
+                : 'border border-[#d8e0d8] bg-white text-[#55665c] hover:bg-slate-50'
+            }`}
+          >
+            <span>Hộp thư thông báo nhận được ({notifications.length})</span>
+            {unreadCount > 0 && (
+              <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-extrabold text-white">
+                {unreadCount} mới
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('create')}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition ${
+              activeTab === 'create'
+                ? 'bg-[#176b52] text-white shadow-sm'
+                : 'border border-[#d8e0d8] bg-white text-[#55665c] hover:bg-slate-50'
+            }`}
+          >
+            <FontAwesomeIcon icon={faPlus} />
+            <span>{senderRole === 'SHOP' ? 'Tạo thông báo từ Cửa hàng' : 'Tạo & Phát thông báo mới'}</span>
           </button>
         </div>
 
-        {notifications.length === 0 && (
-          <div className="panel p-10 text-center text-sm text-slate-500">Chưa có thông báo nào.</div>
+        {activeTab === 'inbox' && notifications.length > 0 && (
+          <button onClick={() => void clearAll()} className="text-xs font-bold text-[#176b52] hover:underline">
+            Đánh dấu tất cả đã đọc
+          </button>
         )}
+      </div>
 
-        {notifications.map(item => (
-          <article
-            key={item.id}
-            className={`panel flex items-start gap-3 p-4 ${
-              item.is_read ? 'opacity-70' : 'border-emerald-200 bg-emerald-50/40'
-            }`}
-          >
-            <span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-600 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h4 className="text-sm font-bold text-[#1f2d25]">{item.title}</h4>
-                {item.event_type === 'system.broadcast' && (
-                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800">
-                    Toàn sàn
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-slate-600">{item.body}</p>
-              <time className="mt-2 block text-[10px] text-slate-400">
-                {item.created_at ? new Date(item.created_at).toLocaleString('vi-VN') : item.event_type}
-              </time>
+      {/* Tab 2: Broadcast Form Panel */}
+      {activeTab === 'create' && (
+        <section className="panel p-6 space-y-5">
+          <div className="border-b border-[#f0f4f1] pb-3">
+            <h2 className="text-base font-extrabold text-[#1e2e26]">
+              {senderRole === 'SHOP' ? 'Tạo thông báo từ Cửa hàng (Shop)' : 'Gửi thông báo toàn hệ thống'}
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              {senderRole === 'SHOP'
+                ? 'Gửi thông báo ưu đãi nông sản mới, lịch thu hoạch hoặc thông tin đơn hàng đến khách hàng.'
+                : 'Phát thông báo đẩy đến tất cả người dùng hoặc lọc theo vai trò (Khách hàng, Cửa hàng, Tài xế).'}
+            </p>
+          </div>
+
+          {successMsg && (
+            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs font-semibold text-emerald-800">
+              {successMsg}
             </div>
-            {!item.is_read && (
+          )}
+
+          <form onSubmit={handleBroadcast} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-[#3d5045] mb-1">Đối tượng nhận thông báo</label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                {[
+                  { id: 'ALL', label: 'Tất cả người dùng' },
+                  { id: 'CUSTOMER', label: 'Chỉ Khách hàng' },
+                  { id: 'SHOP', label: 'Chỉ Cửa hàng (Shop)' },
+                  { id: 'SHIPPER', label: 'Chỉ Tài xế (Shipper)' },
+                ].map(opt => (
+                  <label
+                    key={opt.id}
+                    className={`flex items-center gap-2 rounded-xl border p-2.5 cursor-pointer text-xs font-semibold ${
+                      targetRole === opt.id
+                        ? 'border-[#176b52] bg-[#f4f9f6] text-[#176b52]'
+                        : 'border-[#e8ede8] text-[#55695f] hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="targetRole"
+                      checked={targetRole === opt.id}
+                      onChange={() => setTargetRole(opt.id as any)}
+                    />
+                    <span>{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-bold text-[#3d5045] mb-1">Tiêu đề thông báo *</label>
+                <input
+                  required
+                  minLength={2}
+                  maxLength={160}
+                  placeholder="Ví dụ: Lịch bảo trì hệ thống hoặc Ưu đãi nông sản hôm nay..."
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  className="w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-[#3d5045] mb-1">Trang điều hướng khi bấm vào</label>
+                <select
+                  value={linkUrl}
+                  onChange={e => setLinkUrl(e.target.value)}
+                  className="w-full rounded-xl border border-[#d2ddd5] bg-white p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                >
+                  <option value="/newfeed">Bảng tin Newfeed (/newfeed)</option>
+                  <option value="/products">Danh mục Sản phẩm (/products)</option>
+                  <option value="/orders">Quản lý Đơn hàng (/orders)</option>
+                  <option value="/requests">Yêu cầu Mặt hàng mới (/requests)</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-[#3d5045] mb-1">Nội dung chi tiết *</label>
+              <textarea
+                required
+                minLength={2}
+                maxLength={2000}
+                rows={3}
+                placeholder="Nội dung thông báo gửi đến người dùng..."
+                value={body}
+                onChange={e => setBody(e.target.value)}
+                className="w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+              />
+            </div>
+
+            <div className="flex justify-end">
               <button
-                onClick={() => void markRead(item.id)}
-                className="text-xs font-semibold text-[#176b52] hover:underline shrink-0"
+                type="submit"
+                disabled={busy}
+                className="rounded-xl bg-[#176b52] px-6 py-2.5 text-xs font-bold text-white shadow-md hover:bg-[#125340] disabled:opacity-50"
               >
-                Đã đọc
+                {busy ? 'Đang gửi thông báo…' : 'Phát thông báo ngay'}
               </button>
-            )}
-          </article>
-        ))}
-      </section>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {/* Tab 1: Notifications List */}
+      {activeTab === 'inbox' && (
+        <section className="space-y-3">
+          {notifications.length === 0 && (
+            <div className="panel p-10 text-center text-sm text-slate-500">Chưa có thông báo nào trong hộp thư.</div>
+          )}
+
+          {notifications.map(item => {
+            const targetHref = resolveNotificationLink(item);
+            return (
+              <article
+                key={item.id}
+                onClick={() => {
+                  if (!item.is_read) void markRead(item.id);
+                  if (onNavigate && targetHref) onNavigate(targetHref);
+                }}
+                className={`panel flex cursor-pointer items-start gap-3 p-4 transition hover:border-[#176b52]/40 hover:shadow-md ${
+                  item.is_read ? 'opacity-75' : 'border-emerald-200 bg-emerald-50/40'
+                }`}
+              >
+                <span className={`mt-1 h-2.5 w-2.5 rounded-full shrink-0 ${item.is_read ? 'bg-slate-300' : 'bg-emerald-600'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-sm font-bold text-[#1f2d25]">{item.title}</h4>
+                    {item.event_type === 'system.broadcast' && (
+                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800">
+                        Toàn sàn
+                      </span>
+                    )}
+                    <span className="ml-auto text-[11px] font-semibold text-[#176b52] hover:underline">
+                      Xem chi tiết →
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-600">{item.body}</p>
+                  <time className="mt-2 block text-[10px] text-slate-400">
+                    {item.created_at ? new Date(item.created_at).toLocaleString('vi-VN') : item.event_type}
+                  </time>
+                </div>
+                {!item.is_read && (
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      void markRead(item.id);
+                    }}
+                    className="text-xs font-semibold text-[#176b52] hover:underline shrink-0"
+                  >
+                    Đã đọc
+                  </button>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      )}
     </div>
   );
 }

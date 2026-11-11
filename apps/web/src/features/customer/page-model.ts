@@ -88,8 +88,127 @@ export function normalizeOrder(raw: any): Order {
     shop_name: raw.shop_name,
     shipper_id: raw.shipper_id,
     shipper_name: raw.shipper_name,
+    shipper_phone: raw.shipper_phone,
+    shipper_vehicle: raw.shipper_vehicle,
     note: raw.note,
   };
+}
+
+export const ORDER_STATUS_PRIORITY: Record<string, number> = {
+  'Chờ xác nhận': 1,
+  'Chờ duyệt': 1,
+  PENDING: 1,
+  'Đã xác nhận': 2,
+  'Đã duyệt': 2,
+  CONFIRMED: 2,
+  APPROVED: 2,
+  'Đang chuẩn bị': 3,
+  PREPARING: 3,
+  'Chờ Shipper lấy hàng': 4,
+  READY_FOR_PICKUP: 4,
+  'Shipper đã lấy hàng': 5,
+  PICKED_UP: 5,
+  'Đang giao': 6,
+  DELIVERING: 6,
+  'Hoàn thành': 7,
+  COMPLETED: 7,
+  'Từ chối': 8,
+  REJECTED: 8,
+  'Đã hủy': 9,
+  CANCELLED: 9,
+};
+
+export function sortOrdersByPriority(list: Order[]): Order[] {
+  return [...list].sort((a, b) => {
+    const pa = ORDER_STATUS_PRIORITY[a.status] ?? 5;
+    const pb = ORDER_STATUS_PRIORITY[b.status] ?? 5;
+    if (pa !== pb) return pa - pb;
+    const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return tb - ta;
+  });
+}
+
+export function getOrderVisualMeta(status: string) {
+  switch (status) {
+    case 'Chờ xác nhận':
+    case 'Chờ duyệt':
+    case 'PENDING':
+      return {
+        border: 'border-l-4 border-l-amber-500',
+        badge: 'bg-amber-100 text-amber-800 border border-amber-200',
+        rowBg: 'bg-amber-50/20',
+        isDone: false,
+        muted: false,
+      };
+    case 'Đã xác nhận':
+    case 'Đã duyệt':
+    case 'CONFIRMED':
+      return {
+        border: 'border-l-4 border-l-blue-500',
+        badge: 'bg-blue-100 text-blue-800 border border-blue-200',
+        rowBg: 'bg-blue-50/15',
+        isDone: false,
+        muted: false,
+      };
+    case 'Đang chuẩn bị':
+    case 'PREPARING':
+      return {
+        border: 'border-l-4 border-l-indigo-500',
+        badge: 'bg-indigo-100 text-indigo-800 border border-indigo-200',
+        rowBg: 'bg-indigo-50/15',
+        isDone: false,
+        muted: false,
+      };
+    case 'Chờ Shipper lấy hàng':
+    case 'READY_FOR_PICKUP':
+      return {
+        border: 'border-l-4 border-l-orange-500',
+        badge: 'bg-orange-100 text-orange-800 border border-orange-200',
+        rowBg: 'bg-orange-50/15',
+        isDone: false,
+        muted: false,
+      };
+    case 'Shipper đã lấy hàng':
+    case 'PICKED_UP':
+    case 'Đang giao':
+    case 'DELIVERING':
+      return {
+        border: 'border-l-4 border-l-cyan-500',
+        badge: 'bg-cyan-100 text-cyan-800 border border-cyan-200',
+        rowBg: 'bg-cyan-50/20',
+        isDone: false,
+        muted: false,
+      };
+    case 'Hoàn thành':
+    case 'COMPLETED':
+      return {
+        border: 'border-l-4 border-l-slate-400',
+        badge: 'bg-slate-200 text-slate-700 border border-slate-300',
+        rowBg: 'bg-slate-100/75 opacity-75 text-slate-500',
+        isDone: true,
+        muted: true,
+      };
+    case 'Từ chối':
+    case 'Đã hủy':
+    case 'REJECTED':
+    case 'CANCELLED':
+      return {
+        border: 'border-l-4 border-l-rose-400',
+        badge: 'bg-rose-100 text-rose-700 border border-rose-200',
+        rowBg: 'bg-slate-100/60 opacity-65 text-slate-400',
+        isDone: true,
+        muted: true,
+      };
+    default:
+      return {
+        border: 'border-l-4 border-l-emerald-500',
+        badge: 'bg-emerald-50 text-[#176b52]',
+        rowBg: 'bg-white',
+        isDone: false,
+        muted: false,
+      };
+  }
 }
 
 export function normalizeRequest(raw: any): ProductRequest {

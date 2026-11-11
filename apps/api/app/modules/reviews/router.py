@@ -4,6 +4,7 @@ from sqlalchemy import select, and_, or_
 
 from app.api.deps import get_db, get_current_user, require_admin, require_admin_or_shop, require_shop
 from app.models import ProductReview, ShipperReview, Order, OrderItem, Product, User, ModerationTerm, ModerationViolation
+from app.realtime import event, manager
 from app.schemas import (
     ProductReviewIn,
     ProductReviewOut,
@@ -102,7 +103,7 @@ def get_product_reviews(product_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/products/{product_id}/reviews", response_model=ProductReviewOut, status_code=201)
-def create_product_review(
+async def create_product_review(
     product_id: int,
     payload: ProductReviewIn,
     db: Session = Depends(get_db),
@@ -152,11 +153,13 @@ def create_product_review(
     db.add(rev)
     db.commit()
     db.refresh(rev)
-    return enrich_review(db, rev)
+    enriched = enrich_review(db, rev)
+    await manager.broadcast(event("notification.created", {"event_type": "review.created", "product_id": product_id, "order_id": payload.order_id}))
+    return enriched
 
 
 @router.post("/reviews/{review_id}/reply", response_model=ProductReviewOut)
-def reply_to_review(
+async def reply_to_review(
     review_id: int,
     payload: ReviewReplyIn,
     db: Session = Depends(get_db),
@@ -173,11 +176,13 @@ def reply_to_review(
     rev.shop_reply = payload.reply
     db.commit()
     db.refresh(rev)
-    return enrich_review(db, rev)
+    enriched = enrich_review(db, rev)
+    await manager.broadcast(event("notification.created", {"event_type": "review.replied", "review_id": review_id, "order_id": rev.order_id}))
+    return enriched
 
 
 @router.post("/orders/{order_id}/shipper-review", response_model=ShipperReviewOut, status_code=201)
-def review_shipper(
+async def review_shipper(
     order_id: int,
     payload: ShipperReviewIn,
     db: Session = Depends(get_db),
@@ -214,6 +219,7 @@ def review_shipper(
     db.add(rev)
     db.commit()
     db.refresh(rev)
+    await manager.broadcast(event("notification.created", {"event_type": "shipper_review.created", "order_id": order.id, "shipper_id": order.shipper_id}))
     return rev
 
 

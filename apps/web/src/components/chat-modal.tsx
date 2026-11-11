@@ -23,7 +23,7 @@ interface ChatModalProps {
   conversations: Conversation[];
   activePeerId?: number;
   messages: ChatMessage[];
-  onSelectPeer: (peerId: number) => void;
+  onSelectPeer: (peerId: number, peerUser?: ChatUser) => void;
   onSendMessage: (content: string, peerId?: number, orderId?: number) => Promise<void>;
 }
 
@@ -39,16 +39,21 @@ export default function ChatModal({
 }: ChatModalProps) {
   const [inputText, setInputText] = useState('');
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [localConversations, setLocalConversations] = useState<Conversation[]>(conversations);
   const [selectedPeer, setSelectedPeer] = useState<number | undefined>(activePeerId || conversations[0]?.peer_id);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setLocalConversations(conversations);
+  }, [conversations]);
+
+  useEffect(() => {
     if (activePeerId) {
       setSelectedPeer(activePeerId);
-    } else if (!selectedPeer && conversations.length > 0) {
-      setSelectedPeer(conversations[0].peer_id);
+    } else if (!selectedPeer && localConversations.length > 0) {
+      setSelectedPeer(localConversations[0].peer_id);
     }
-  }, [activePeerId, conversations]);
+  }, [activePeerId, localConversations, selectedPeer]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -63,7 +68,7 @@ export default function ChatModal({
     setInputText('');
   };
 
-  const currentContact = conversations.find(c => c.peer_id === selectedPeer);
+  const currentContact = localConversations.find(c => c.peer_id === selectedPeer);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
@@ -86,7 +91,7 @@ export default function ChatModal({
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-[#edf2ee]">
-            {conversations.map(c => (
+            {localConversations.map(c => (
               <button
                 key={c.peer_id}
                 onClick={() => {
@@ -120,7 +125,7 @@ export default function ChatModal({
               </button>
             ))}
 
-            {conversations.length === 0 && (
+            {localConversations.length === 0 && (
               <div className="p-6 text-center text-xs text-[#809187]">Chưa có cuộc trò chuyện nào.</div>
             )}
           </div>
@@ -201,8 +206,24 @@ export default function ChatModal({
         isOpen={isPickerOpen}
         onClose={() => setIsPickerOpen(false)}
         onSelectUser={u => {
+          setLocalConversations(prev => {
+            if (prev.some(c => c.peer_id === u.id)) return prev;
+            return [
+              {
+                peer_id: u.id,
+                peer_name: u.shop_name || u.full_name,
+                peer_role: u.role,
+                avatar_url: u.avatar_url,
+                last_message: 'Bắt đầu cuộc trò chuyện...',
+                last_time: new Date().toISOString(),
+                unread: 0,
+                order_id: null,
+              },
+              ...prev,
+            ];
+          });
           setSelectedPeer(u.id);
-          onSelectPeer(u.id);
+          onSelectPeer(u.id, u);
         }}
         currentUserRole={currentUser?.role}
       />

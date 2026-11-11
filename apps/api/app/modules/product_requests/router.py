@@ -8,8 +8,8 @@ from app.modules.product_requests import service
 router = APIRouter()
 
 @router.post('/product-requests', status_code=201)
-def create_product_request(payload: ProductRequestIn, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
-    return service.create_product_request(payload=payload, db=db, user=user)
+async def create_product_request(payload: ProductRequestIn, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    return await service.create_product_request(payload=payload, db=db, user=user)
 
 @router.get('/product-requests')
 def list_product_requests(db: Session=Depends(get_db), user: User=Depends(get_current_user)):

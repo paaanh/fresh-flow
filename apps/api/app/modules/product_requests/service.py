@@ -22,12 +22,25 @@ def serialize_request(db: Session, req: ProductRequest) -> dict:
     }
 
 
-def create_product_request(payload: ProductRequestIn, db: Session=None, user: User=None):
+async def create_product_request(payload: ProductRequestIn, db: Session=None, user: User=None):
     request = ProductRequest(user_id=user.id, **payload.model_dump())
     db.add(request)
+    db.flush()
+    managers = db.scalars(select(User).where(User.role.in_(['ADMIN', 'SHOP']))).all()
+    for m in managers:
+        add_notification(
+            db,
+            m.id,
+            f'Yêu cầu mặt hàng mới: {request.product_name}',
+            f'Khách hàng {user.full_name} vừa gửi yêu cầu đặt mặt hàng "{request.product_name}".',
+            'product_request.updated',
+            link=f'/requests#request-{request.id}',
+        )
     db.commit()
     db.refresh(request)
-    return serialize_request(db, request)
+    serialized = serialize_request(db, request)
+    await manager.broadcast(event('product_request.updated', {'request_id': request.id, 'request': serialized}))
+    return serialized
 
 
 def list_product_requests(db: Session=None, user: User=None):
@@ -57,9 +70,25 @@ async def respond_product_request(request_id: int, payload: ProductRequestRespon
             'Yêu cầu mặt hàng được cập nhật',
             payload.admin_response or f'Yêu cầu "{request.product_name}" đã chuyển sang trạng thái {payload.status}.',
             'product_request.updated',
+            link=f'/requests#request-{request.id}',
         )
         db.commit()
-        await manager.send_user(request.user_id, event('notification.created', {'type': 'product_request.updated', 'request_id': request.id}))
+        serialized = serialize_request(db, request)
+        await manager.send_user(request.user_id, event('notification.created', {'type': 'product_request.updated', 'request_id': request.id, 'request': serialized}))
+        await manager.broadcast(event('product_request.updated', {'request_id': request.id, 'request': serialized}))
+        return serialized
     else:
+        managers = db.scalars(select(User).where(User.role.in_(['ADMIN', 'SHOP']))).all()
+        for m in managers:
+            add_notification(
+                db,
+                m.id,
+                f'Khách phản hồi báo giá: {request.product_name}',
+                payload.admin_response or f'Khách hàng đã cập nhật yêu cầu "{request.product_name}" sang {payload.status}.',
+                'product_request.updated',
+                link=f'/requests#request-{request.id}',
+            )
         db.commit()
-    return serialize_request(db, request)
+        serialized = serialize_request(db, request)
+        await manager.broadcast(event('product_request.updated', {'request_id': request.id, 'request': serialized}))
+        return serialized

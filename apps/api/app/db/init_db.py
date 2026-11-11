@@ -86,6 +86,16 @@ def init_database():
         if "cash_collected_by_shipper" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN cash_collected_by_shipper NUMERIC(12, 2) DEFAULT 0"))
 
+        # Posts columns
+        post_cols = {col["name"] for col in inspector.get_columns("posts")}
+        if "product_ids" not in post_cols:
+            conn.execute(text("ALTER TABLE posts ADD COLUMN product_ids VARCHAR(512) DEFAULT ''"))
+
+        # Notifications columns
+        notif_cols = {col["name"] for col in inspector.get_columns("notifications")}
+        if "link" not in notif_cols:
+            conn.execute(text("ALTER TABLE notifications ADD COLUMN link VARCHAR(255) DEFAULT ''"))
+
         if not inspector.has_table("alembic_version"):
             conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"))
             conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0004_full_upgrade')"))

@@ -59,7 +59,11 @@ async def claim_order(
     if order.status in {"CONFIRMED", "PREPARING"}:
         order.status = "READY_FOR_PICKUP"
     if order.shop_id:
-        add_notification(db, order.shop_id, "Shipper đã nhận đơn", f"Shipper {shipper.full_name} đang đến lấy đơn {order.order_number}.", "order.assigned")
+        add_notification(db, order.shop_id, "Shipper đã nhận đơn", f"Shipper {shipper.full_name} ({shipper.phone or 'SĐT đang cập nhật'}) đang đến lấy đơn {order.order_number}.", "order.assigned", link=f"/orders/{order.order_number}")
+    admins = db.scalars(select(User).where(User.role == "ADMIN")).all()
+    for adm in admins:
+        add_notification(db, adm.id, f"Shipper nhận đơn {order.order_number}", f"Shipper {shipper.full_name} ({shipper.phone or 'SĐT đang cập nhật'}) đã nhận phụ trách giao đơn {order.order_number}.", "order.assigned", link=f"/admin/orders/{order.order_number}")
+    add_notification(db, order.user_id, f"Shipper {shipper.full_name} đã nhận đơn {order.order_number}", f"Tài xế {shipper.full_name} ({shipper.vehicle_info or 'Xe máy'} · {shipper.phone or 'Chưa cập nhật'}) đã nhận phụ trách giao đơn hàng của bạn.", "order.assigned", link=f"/orders/{order.order_number}")
 
     db.add(
         OrderStatusHistory(
@@ -67,7 +71,7 @@ async def claim_order(
             changed_by=shipper.id,
             old_status=old_status,
             new_status=order.status,
-            note=f"Shipper {shipper.full_name} đã nhận phụ trách giao đơn",
+            note=f"Shipper {shipper.full_name} ({shipper.phone or ''}) đã nhận phụ trách giao đơn",
         )
     )
     db.commit()
@@ -75,6 +79,30 @@ async def claim_order(
     order_repo.enrich_order_names(db, order)
     if order.shop_id:
         await manager.send_user(order.shop_id, event("notification.created", {"event_type": "order.assigned", "order_id": order.id, "shipper_id": shipper.id}))
+    await manager.send_user(order.user_id, event("order.status_changed", {"order_id": order.id, "order_number": order.order_number, "status": order.status}))
+    await manager.broadcast(
+        event(
+            "order.assigned",
+            {
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "shipper_id": shipper.id,
+                "shipper_name": shipper.full_name,
+                "status": order.status,
+            },
+        )
+    )
+    await manager.broadcast(
+        event(
+            "order.status_changed",
+            {
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "status": order.status,
+                "actor_role": "SHIPPER",
+            },
+        )
+    )
     return order
 
 
@@ -130,6 +158,18 @@ async def mark_completed(
             note="Shipper thu tiền khi giao thành công",
         )
         order = order_service.update_order_payment(db, order.id, payment_in, shipper)
+        await manager.broadcast(
+            event(
+                "order.status_changed",
+                {
+                    "order_id": order.id,
+                    "order_number": order.order_number,
+                    "status": order.status,
+                    "payment_status": order.payment_status,
+                    "actor_role": "SHIPPER",
+                },
+            )
+        )
     return order
 
 

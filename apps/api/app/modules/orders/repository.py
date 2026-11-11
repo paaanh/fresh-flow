@@ -73,6 +73,8 @@ def enrich_order_names(db: Session, order: Order):
     if order.shipper_id:
         shipper = db.get(User, order.shipper_id)
         order.shipper_name = shipper.full_name if shipper else None
+        order.shipper_phone = shipper.phone if shipper else None
+        order.shipper_vehicle = shipper.vehicle_info if shipper else None
 
 
 def get_order_history(db: Session, order_id: int):

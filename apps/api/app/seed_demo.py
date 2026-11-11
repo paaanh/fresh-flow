@@ -28,12 +28,18 @@ from app.models import (
 
 ADMIN_EMAIL = "admin@freshflow.example.com"
 ADMIN_PASSWORD = "FreshFlowAdmin123!"
+SHOP_EMAIL = "shop@freshflow.example.com"
+SHOP_PASSWORD = "FreshFlowShop123!"
+SHIPPER_EMAIL = "shipper@freshflow.example.com"
+SHIPPER_PASSWORD = "FreshFlowDemo123!"
 STUDENT_EMAIL = "student@freshflow.example.com"
 STUDENT_PASSWORD = "FreshFlowDemo123!"
 WORKER_EMAIL = "worker@freshflow.example.com"
 WORKER_PASSWORD = "FreshFlowDemo123!"
 LEGACY_EMAILS = {
     ADMIN_EMAIL: "admin@freshflow.local",
+    SHOP_EMAIL: "shop@freshflow.local",
+    SHIPPER_EMAIL: "shipper@freshflow.local",
     STUDENT_EMAIL: "student@freshflow.local",
     WORKER_EMAIL: "worker@freshflow.local",
 }
@@ -68,12 +74,14 @@ def get_category(db, name: str) -> Category:
     return category
 
 
-def get_product(db, *, name: str, category: Category, description: str, unit: str, price: str, image: str) -> Product:
+def get_product(db, *, name: str, category: Category, description: str, unit: str, price: str, image: str, shop_id: int | None = None) -> Product:
     product = db.scalar(select(Product).where(Product.name == name))
     if product is None:
         product = Product(name=name)
         db.add(product)
     product.category_id = category.id
+    if shop_id is not None and product.shop_id is None:
+        product.shop_id = shop_id
     product.description = description
     product.unit = unit
     product.base_price = Decimal(price)
@@ -87,8 +95,7 @@ def ensure_batch(db, product: Product, batch_date: datetime, quantity: str) -> I
     batch = db.scalar(
         select(InventoryBatch).where(
             InventoryBatch.product_id == product.id,
-            InventoryBatch.batch_date == batch_date,
-        )
+        ).order_by(InventoryBatch.id.asc())
     )
     if batch is None:
         batch = InventoryBatch(
@@ -99,6 +106,9 @@ def ensure_batch(db, product: Product, batch_date: datetime, quantity: str) -> I
             is_open=True,
         )
         db.add(batch)
+        db.flush()
+    elif batch.initial_quantity < Decimal(quantity):
+        batch.initial_quantity = Decimal(quantity)
         db.flush()
     return batch
 
@@ -151,7 +161,8 @@ def ensure_address(db, user: User, label: str, recipient: str, phone: str, line1
 def ensure_order(db, *, number: str, user: User, admin: User, status: str,
                  delivery_type: str, address: str, slot: DeliverySlot,
                  product: Product, batch: InventoryBatch, quantity: str,
-                 unit_price: str, created_at: datetime) -> None:
+                 unit_price: str, created_at: datetime,
+                 shipper: User | None = None) -> None:
     order = db.scalar(select(Order).where(Order.order_number == number))
     if order is not None:
         return
@@ -167,9 +178,13 @@ def ensure_order(db, *, number: str, user: User, admin: User, status: str,
     order = Order(
         order_number=number,
         user_id=user.id,
+        shop_id=product.shop_id,
+        shipper_id=shipper.id if shipper and status in {"DELIVERING", "COMPLETED"} else None,
         status=status,
         delivery_type=delivery_type,
         delivery_address=address,
+        recipient_name=user.full_name,
+        recipient_phone=user.phone or "0900000100",
         delivery_fee=slot.fee,
         subtotal=subtotal,
         vat_rate=vat_rate,
@@ -275,6 +290,10 @@ def main() -> None:
     db = SessionLocal()
     try:
         admin = get_user(db, ADMIN_EMAIL, "FreshFlow Admin", "ADMIN", "WORKING", "0900000101", ADMIN_PASSWORD)
+        shop = get_user(db, SHOP_EMAIL, "Đà Lạt Green Farm", "SHOP", "WORKING", "0900000002", SHOP_PASSWORD)
+        if not shop.shop_name:
+            shop.shop_name = "Đà Lạt Green Farm"
+        shipper = get_user(db, SHIPPER_EMAIL, "Shipper Minh Long", "SHIPPER", "WORKING", "0900000003", SHIPPER_PASSWORD)
         student = get_user(db, STUDENT_EMAIL, "Nguyễn Minh Anh", "CUSTOMER", "STUDENT", "0900000102", STUDENT_PASSWORD)
         worker = get_user(db, WORKER_EMAIL, "Trần Hoàng Nam", "CUSTOMER", "WORKING", "0900000103", WORKER_PASSWORD)
 
@@ -282,12 +301,12 @@ def main() -> None:
         fruits = get_category(db, "Trái cây")
         staples = get_category(db, "Thực phẩm")
         products = [
-            get_product(db, name="Rau cải kale", category=vegetables, description="Rau kale tươi thu hoạch trong ngày.", unit="bó", price="42000", image="http://localhost:3000/images/kale.jpg"),
-            get_product(db, name="Bơ sáp", category=fruits, description="Bơ sáp chín tự nhiên.", unit="kg", price="68000", image="http://localhost:3000/images/avocado.jpg"),
-            get_product(db, name="Chuối tiêu", category=fruits, description="Chuối tiêu chín vừa.", unit="nải", price="28000", image="http://localhost:3000/images/banana.jpg"),
-            get_product(db, name="Trứng gà sạch", category=staples, description="Trứng gà đóng hộp 10 quả.", unit="hộp", price="35000", image="http://localhost:3000/images/eggs.jpg"),
+            get_product(db, name="Rau cải kale", category=vegetables, description="Rau kale tươi thu hoạch trong ngày.", unit="bó", price="42000", image="http://localhost:3000/images/kale.jpg", shop_id=shop.id),
+            get_product(db, name="Bơ sáp", category=fruits, description="Bơ sáp chín tự nhiên.", unit="kg", price="68000", image="http://localhost:3000/images/avocado.jpg", shop_id=shop.id),
+            get_product(db, name="Chuối tiêu", category=fruits, description="Chuối tiêu chín vừa.", unit="nải", price="28000", image="http://localhost:3000/images/banana.jpg", shop_id=shop.id),
+            get_product(db, name="Trứng gà sạch", category=staples, description="Trứng gà đóng hộp 10 quả.", unit="hộp", price="35000", image="http://localhost:3000/images/eggs.jpg", shop_id=shop.id),
         ]
-        batches = {product.name: ensure_batch(db, product, batch_date, "100") for product in products}
+        batches = {product.name: ensure_batch(db, product, batch_date, "300") for product in products}
         for product, student_price, worker_price in zip(products, ("39000", "62000", "25000", "33000"), ("42000", "68000", "28000", "35000")):
             ensure_price(db, product, "STUDENT", student_price)
             ensure_price(db, product, "WORKING", worker_price)
@@ -303,8 +322,44 @@ def main() -> None:
         ensure_address(db, worker, "Nhà", worker.full_name, worker.phone or "0900000103", "12 Nguyễn Huệ")
 
         ensure_order(db, number="FF-DEMO-PENDING-01", user=student, admin=admin, status="PENDING", delivery_type="PICKUP", address="", slot=student_slot, product=products[0], batch=batches[products[0].name], quantity="2", unit_price="39000", created_at=now - timedelta(hours=2))
-        ensure_order(db, number="FF-DEMO-PREPARING-01", user=worker, admin=admin, status="PREPARING", delivery_type="HOME", address="12 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh", slot=worker_slot, product=products[1], batch=batches[products[1].name], quantity="1", unit_price="68000", created_at=now - timedelta(days=1))
-        ensure_order(db, number="FF-DEMO-COMPLETED-01", user=student, admin=admin, status="COMPLETED", delivery_type="PICKUP", address="", slot=student_slot, product=products[2], batch=batches[products[2].name], quantity="3", unit_price="25000", created_at=now - timedelta(days=3))
+        ensure_order(db, number="FF-DEMO-PREPARING-01", user=worker, admin=admin, status="PREPARING", delivery_type="HOME", address="12 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh", slot=worker_slot, product=products[1], batch=batches[products[1].name], quantity="1", unit_price="68000", created_at=now - timedelta(days=1), shipper=shipper)
+        ensure_order(db, number="FF-DEMO-COMPLETED-01", user=student, admin=admin, status="COMPLETED", delivery_type="PICKUP", address="", slot=student_slot, product=products[2], batch=batches[products[2].name], quantity="3", unit_price="25000", created_at=now - timedelta(days=3), shipper=shipper)
+
+        # Seed realistic 14-day completed orders for dashboard revenue chart
+        revenue_series = [
+            (13, 0, "3", student, student_slot, "PICKUP", ""),
+            (12, 1, "4", worker, worker_slot, "HOME", "12 Nguyễn Huệ, Quận 1"),
+            (11, 2, "5", student, student_slot, "PICKUP", ""),
+            (10, 3, "6", worker, worker_slot, "HOME", "12 Nguyễn Huệ, Quận 1"),
+            (9, 1, "3", student, student_slot, "PICKUP", ""),
+            (8, 0, "8", worker, worker_slot, "HOME", "12 Nguyễn Huệ, Quận 1"),
+            (7, 3, "5", student, student_slot, "PICKUP", ""),
+            (6, 1, "6", worker, worker_slot, "HOME", "12 Nguyễn Huệ, Quận 1"),
+            (5, 2, "7", student, student_slot, "PICKUP", ""),
+            (4, 0, "6", worker, worker_slot, "HOME", "12 Nguyễn Huệ, Quận 1"),
+            (2, 1, "7", worker, worker_slot, "HOME", "12 Nguyễn Huệ, Quận 1"),
+            (1, 3, "9", student, student_slot, "PICKUP", ""),
+            (0, 1, "5", worker, worker_slot, "HOME", "12 Nguyễn Huệ, Quận 1"),
+        ]
+        for idx_rev, (days_ago, prod_idx, qty_str, cust, slt, dtype, addr) in enumerate(revenue_series, start=1):
+            prod = products[prod_idx]
+            u_price = str(prod.base_price)
+            ensure_order(
+                db,
+                number=f"FF-DEMO-REV-{idx_rev:02d}",
+                user=cust,
+                admin=admin,
+                status="COMPLETED",
+                delivery_type=dtype,
+                address=addr,
+                slot=slt,
+                product=prod,
+                batch=batches[prod.name],
+                quantity=qty_str,
+                unit_price=u_price,
+                created_at=now - timedelta(days=days_ago, hours=1),
+                shipper=shipper,
+            )
 
         ensure_request(db, student, "Sữa hạt không đường", "Danh mục: Đồ uống; số lượng: 4 hộp.", "OPEN")
         ensure_request(db, worker, "Mật ong hoa cà phê", "Đã báo giá demo.", "QUOTED", "Có thể cung cấp trong tuần này.", "125000")
@@ -319,7 +374,7 @@ def main() -> None:
         print(f"Admin: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
         print(f"Student: {STUDENT_EMAIL} / {STUDENT_PASSWORD}")
         print(f"Worker: {WORKER_EMAIL} / {WORKER_PASSWORD}")
-        print(f"Products: {len(products)}; open inventory batches: {len(batches)}; sample orders: 3")
+        print(f"Products: {len(products)}; open inventory batches: {len(batches)}; sample orders: {3 + len(revenue_series)}")
     except Exception:
         db.rollback()
         raise

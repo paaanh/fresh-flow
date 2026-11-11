@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faArrowRight,
+  faBars,
   faBell,
   faCheck,
   faCircleQuestion,
@@ -66,10 +67,14 @@ export default function FreshFlow() {
   const pathname = usePathname() || '/dashboard';
   const router = useRouter();
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/');
+  const isNewfeedCreate = pathname.endsWith('/newfeed/create');
   const page =
     isAdminRoute && pathname === '/admin'
       ? 'dashboard'
-      : pathname.split('/').filter(Boolean).pop() || 'dashboard';
+      : isNewfeedCreate
+        ? 'newfeed-create'
+        : pathname.split('/').filter(Boolean).pop() || 'dashboard';
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [role, setRole] = usePersistentState<'admin' | 'shop' | 'customer' | 'shipper'>('freshflow-role', 'customer');
   const [products, setProducts] = useState<Product[]>([]);
@@ -96,7 +101,7 @@ export default function FreshFlow() {
   const [requestDraft, setRequestDraft] = useState({ name: '', category: 'Rau củ', quantity: '2 kg', description: '' });
   const [requestBusy, setRequestBusy] = useState(false);
   const [activeTab, setActiveTab] = useState('Tất cả');
-  const [notifications, setNotifications] = useState<{ id: number; title: string; body: string; event_type: string; is_read: boolean; created_at?: string }[]>([]);
+  const [notifications, setNotifications] = useState<{ id: number; title: string; body: string; event_type: string; is_read: boolean; link?: string; created_at?: string }[]>([]);
   const [currentUser, setCurrentUser] = useState<DomainUser | undefined>();
   const [loadError, setLoadError] = useState('');
   const [reload, setReload] = useState(0);
@@ -131,11 +136,21 @@ export default function FreshFlow() {
   const title =
     detailProduct?.name ||
     (detailOrder ? `Đơn ${detailOrder.id}` : undefined) ||
+    (page === 'newfeed-create' ? 'Đăng bài Newfeed mới' : undefined) ||
     titleMap[page] ||
     'Tổng quan';
 
   const links = admin ? adminSections : shop ? shopSections : shipper ? shipperSections : customerSections;
   const adminOnly = ['inventory', 'deliveries', 'customers', 'reports', 'moderation', 'pricing', 'audit-logs', 'settings'];
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+    if (!authToken.get() && pathname !== '/') {
+      setRole('customer');
+      setApiState('checking');
+      router.replace('/login');
+    }
+  }, [pathname, router, setRole]);
 
   useEffect(() => {
     if (!authToken.get()) {
@@ -170,6 +185,8 @@ export default function FreshFlow() {
 
     let alive = true;
     let realtime: RealtimeClient | undefined;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let onFocusSync: (() => void) | undefined;
     setApiState('checking');
     setLoadError('');
 
@@ -276,26 +293,23 @@ export default function FreshFlow() {
 
         realtime = new RealtimeClient(
           event => {
-            if (
-              [
-                'inventory.updated',
-                'order.status_changed',
-                'notification.created',
-                'order.assigned',
-                'order.new',
-                'chat.message',
-              ].includes(event.type)
-            ) {
+            if (event.type !== 'connection.ready') {
               void refreshSnapshot();
-              const chatData = event.data as any;
-              if (event.type === 'chat.message' && chatData?.content) {
-                setToast(`Tin nhắn mới từ ${chatData.sender_name || 'Hệ thống'}: "${chatData.content}"`);
-                if (Number(chatData.sender_id) === activePeerRef.current) {
-                  setChatMessages(current => current.some(message => message.id === chatData.id) ? current : [...current, {
-                    id: Number(chatData.id), sender_id: Number(chatData.sender_id), sender_name: chatData.sender_name,
-                    content: chatData.content, receiver_id: user.id, is_read: false, created_at: chatData.created_at,
+              const eventData = (event.data || {}) as any;
+              if (event.type === 'chat.message' && eventData?.content) {
+                setToast(`Tin nhắn mới từ ${eventData.sender_name || 'Hệ thống'}: "${eventData.content}"`);
+                if (Number(eventData.sender_id) === activePeerRef.current) {
+                  setChatMessages(current => current.some(message => message.id === eventData.id) ? current : [...current, {
+                    id: Number(eventData.id), sender_id: Number(eventData.sender_id), sender_name: eventData.sender_name,
+                    content: eventData.content, receiver_id: user.id, is_read: false, created_at: eventData.created_at,
                   }]);
                 }
+              } else if (event.type === 'order.new' && eventData?.order_number && Number(eventData.user_id) !== user.id) {
+                setToast(`⚡ Đơn hàng mới ${eventData.order_number} vừa được đặt!`);
+              } else if (event.type === 'order.assigned' && eventData?.order_number) {
+                setToast(`⚡ Đơn ${eventData.order_number} đã được Shipper ${eventData.shipper_name || ''} nhận giao.`);
+              } else if (event.type === 'order.status_changed' && eventData?.order_number && eventData?.status_text) {
+                setToast(`⚡ Đơn ${eventData.order_number} cập nhật trạng thái: ${eventData.status_text}`);
               }
             }
           },
@@ -308,7 +322,21 @@ export default function FreshFlow() {
         );
 
         await refreshSnapshot();
-        if (alive && authToken.get()) realtime.connect();
+        if (alive && authToken.get()) {
+          realtime.connect();
+          onFocusSync = () => {
+            if (alive && authToken.get() && document.visibilityState === 'visible') {
+              void refreshSnapshot();
+            }
+          };
+          window.addEventListener('focus', onFocusSync);
+          document.addEventListener('visibilitychange', onFocusSync);
+          pollTimer = setInterval(() => {
+            if (alive && authToken.get() && document.visibilityState === 'visible') {
+              void refreshSnapshot();
+            }
+          }, 4000);
+        }
       } catch (error) {
         if (alive && authToken.get()) {
           setLoadError(error instanceof Error ? error.message : 'Không tải được tài khoản.');
@@ -321,9 +349,14 @@ export default function FreshFlow() {
     return () => {
       alive = false;
       window.removeEventListener('freshflow:unauthorized', unauthorized);
+      if (onFocusSync) {
+        window.removeEventListener('focus', onFocusSync);
+        document.removeEventListener('visibilitychange', onFocusSync);
+      }
+      if (pollTimer) clearInterval(pollTimer);
       realtime?.close();
     };
-  }, [pathname, reload, router]);
+  }, [reload, router]);
 
   useEffect(() => {
     if (toast) {
@@ -568,7 +601,21 @@ export default function FreshFlow() {
     try {
       const created = await freshflow.createPost<Post>(postData);
       setPosts(current => [created, ...current]);
-      notify('Đã đăng bài quảng bá lên Newfeed thành công!');
+      const [prodsRes, catsRes] = await Promise.all([
+        freshflow.catalog<any>().catch(() => freshflow.products<any>()),
+        freshflow.categories<any>(),
+      ]);
+      const loadedCats = unwrapList<any>(catsRes);
+      setCategories(loadedCats.map((c: any) => ({ id: Number(c.id), name: c.name })));
+      setProducts(
+        unwrapList<any>(prodsRes).map(p =>
+          normalizeProduct({
+            ...p,
+            category_name: loadedCats.find((c: any) => c.id === p.category_id)?.name,
+          })
+        )
+      );
+      notify('Đã đăng bài Newfeed và đồng bộ mặt hàng lên danh sách sản phẩm!');
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Không thể đăng bài');
     }
@@ -684,10 +731,31 @@ export default function FreshFlow() {
     }
   };
 
-  const handleSelectPeer = (peerId: number) => {
+  const handleSelectPeer = (peerId: number, peerUser?: any) => {
     setActivePeerId(peerId);
     activePeerRef.current = peerId;
-    void openChatWith(peerId, false);
+    if (peerUser) {
+      setConversations(prev => {
+        if (prev.some(c => c.peer_id === peerId)) return prev;
+        return [
+          {
+            peer_id: peerId,
+            peer_name: peerUser.shop_name || peerUser.full_name || `Người dùng #${peerId}`,
+            peer_role: peerUser.role,
+            avatar_url: peerUser.avatar_url,
+            last_message: 'Bắt đầu cuộc trò chuyện...',
+            last_time: new Date().toISOString(),
+            unread: 0,
+            order_id: null,
+          },
+          ...prev,
+        ];
+      });
+    }
+    freshflow
+      .chatMessages<ChatMessage>(peerId)
+      .then(msgs => setChatMessages(unwrapList<ChatMessage>(msgs)))
+      .catch(() => setChatMessages([]));
   };
 
   useEffect(() => {
@@ -784,19 +852,41 @@ export default function FreshFlow() {
 
   return (
     <div className="min-h-screen bg-[#fcfdfc]">
-      {/* Desktop Sidebar */}
-      <aside className="desktop-sidebar fixed inset-y-0 left-0 z-20 flex w-[260px] flex-col border-r border-[#e8ede8] bg-white px-5 py-6 shadow-sm">
-        <Link href={admin ? '/admin/dashboard' : shop ? '/shop' : shipper ? '/shipper' : '/dashboard'} className="mb-7 flex items-center gap-3 px-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#176b52] text-white shadow-sm">
-            <FontAwesomeIcon icon={faSeedling} />
-          </div>
-          <div>
-            <div className="text-[18px] font-extrabold tracking-tight text-[#1a2e24]">
-              freshflow<span className="text-[#43967b]">.</span>
+      {/* Mobile Sidebar Overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 backdrop-blur-xs lg:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Responsive Sidebar (Slide-over on mobile < lg, fixed on desktop lg+) */}
+      <aside
+        className={`desktop-sidebar fixed inset-y-0 left-0 z-40 flex w-[260px] flex-col border-r border-[#e8ede8] bg-white px-5 py-6 shadow-sm transition-transform duration-200 lg:z-20 lg:translate-x-0 ${
+          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="mb-7 flex items-center justify-between px-2">
+          <Link href={admin ? '/admin/dashboard' : shop ? '/shop' : shipper ? '/shipper' : '/dashboard'} className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#176b52] text-white shadow-sm">
+              <FontAwesomeIcon icon={faSeedling} />
             </div>
-            <div className="text-[10px] font-bold uppercase tracking-[.16em] text-[#97a29b]">Nông sản mỗi ngày</div>
-          </div>
-        </Link>
+            <div>
+              <div className="text-[18px] font-extrabold tracking-tight text-[#1a2e24]">
+                freshflow<span className="text-[#43967b]">.</span>
+              </div>
+              <div className="text-[10px] font-bold uppercase tracking-[.16em] text-[#97a29b]">Nông sản mỗi ngày</div>
+            </div>
+          </Link>
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 lg:hidden"
+            aria-label="Đóng menu"
+          >
+            <FontAwesomeIcon icon={faXmark} />
+          </button>
+        </div>
 
         {/* Current Role Card */}
         <div className="mb-5 rounded-2xl bg-[#f6faf7] border border-[#e2ece5] p-3">
@@ -843,14 +933,21 @@ export default function FreshFlow() {
       </aside>
 
       {/* Main Container */}
-      <main className="main-content min-h-screen pb-16 pl-[260px]">
+      <main className="main-content min-h-screen pb-16 lg:pl-[260px]">
         {/* Top Header */}
-        <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-[#e9ede8] bg-white/90 px-8 backdrop-blur">
-          <div className="flex items-center gap-4">
+        <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-[#e9ede8] bg-white/90 px-4 sm:px-8 backdrop-blur">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#176b52] hover:bg-slate-50 lg:hidden"
+              aria-label="Mở menu điều hướng"
+            >
+              <FontAwesomeIcon icon={faBars} />
+            </button>
             <div className="text-[11px] font-medium text-[#98a39c]">
               FreshFlow <span className="mx-1">/</span> <span className="font-bold text-[#45574d]">{title}</span>
             </div>
-
           </div>
 
           <div className="flex items-center gap-3">
@@ -908,7 +1005,7 @@ export default function FreshFlow() {
         </header>
 
         {/* Content Body */}
-        <div className="mx-auto max-w-[1440px] px-8 py-7">
+        <div className="mx-auto max-w-[1440px] px-4 py-5 sm:px-8 sm:py-7">
           {/* Breadcrumb Title bar */}
           <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
             <div>
@@ -939,16 +1036,18 @@ export default function FreshFlow() {
 
           {/* PAGE ROUTING DISPATCH */}
 
-          {/* NEWFEED */}
-          {(page === 'newfeed' || (!admin && !shop && !shipper && page === 'dashboard')) && (
+          {/* NEWFEED & NEWFEED CREATE */}
+          {(page === 'newfeed' || page === 'newfeed-create' || (!admin && !shop && !shipper && page === 'dashboard')) && (
             <Newfeed
               posts={posts}
               products={products}
+              categories={categories.map(c => c.name)}
               currentUser={currentUser}
               onAddToCart={addCart}
               onCreatePost={handleCreatePost}
               onUpdatePost={handleUpdatePost}
               money={money}
+              forceCreateMode={page === 'newfeed-create'}
             />
           )}
 
@@ -1112,13 +1211,78 @@ export default function FreshFlow() {
                 onReload={() => setReload(r => r + 1)}
                 markRead={markNotificationRead}
                 clearAll={clearNotifications}
+                onNavigate={href => router.push(href)}
                 senderRole={admin ? 'ADMIN' : 'SHOP'}
               />
             ) : (
               <section className="space-y-3">
-                <div className="flex items-center justify-between"><h2 className="text-lg font-bold">Thông báo</h2><button onClick={() => void clearNotifications()} className="text-xs font-bold text-[#176b52]">Đánh dấu tất cả đã đọc</button></div>
-                {notifications.length === 0 && <div className="panel p-10 text-center text-sm text-slate-500">Bạn chưa có thông báo nào.</div>}
-                {notifications.map(item => <article key={item.id} className={`panel flex items-start gap-3 p-4 ${item.is_read ? 'opacity-70' : 'border-emerald-200 bg-emerald-50/40'}`}><span className="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-600 shrink-0" /><div className="flex-1 min-w-0"><h3 className="text-sm font-bold">{item.title}</h3><p className="mt-1 text-xs text-slate-600">{item.body}</p><time className="mt-2 block text-[10px] text-slate-400">{item.created_at ? new Date(item.created_at).toLocaleString('vi-VN') : item.event_type}</time></div>{!item.is_read && <button onClick={() => void markNotificationRead(item.id)} className="text-xs font-semibold text-[#176b52]">Đã đọc</button>}</article>)}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">Hộp thư Thông báo nhận được</h2>
+                    <p className="text-xs text-slate-400">Bấm vào thông báo bất kỳ để chuyển thẳng đến trang liên quan</p>
+                  </div>
+                  <button onClick={() => void clearNotifications()} className="text-xs font-bold text-[#176b52]">
+                    Đánh dấu tất cả đã đọc
+                  </button>
+                </div>
+                {notifications.length === 0 && (
+                  <div className="panel p-10 text-center text-sm text-slate-500">Bạn chưa có thông báo nào.</div>
+                )}
+                {notifications.map(item => {
+                  const targetHref =
+                    item.link ||
+                    (item.event_type?.startsWith('order.')
+                      ? shipper
+                        ? '/shipper'
+                        : '/orders'
+                      : item.event_type?.startsWith('product_request.')
+                        ? '/requests'
+                        : item.event_type?.startsWith('chat.')
+                          ? '/chat'
+                          : '/newfeed');
+                  return (
+                    <article
+                      key={item.id}
+                      onClick={() => {
+                        if (!item.is_read) void markNotificationRead(item.id);
+                        router.push(targetHref);
+                      }}
+                      className={`panel flex cursor-pointer items-start gap-3 p-4 transition hover:border-[#176b52]/40 hover:shadow-md ${
+                        item.is_read ? 'opacity-75' : 'border-emerald-200 bg-emerald-50/40'
+                      }`}
+                    >
+                      <span
+                        className={`mt-1 h-2.5 w-2.5 rounded-full shrink-0 ${
+                          item.is_read ? 'bg-slate-300' : 'bg-emerald-600'
+                        }`}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="text-sm font-bold">{item.title}</h3>
+                          <span className="text-[11px] font-semibold text-[#176b52] hover:underline">
+                            Xem chi tiết →
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-600">{item.body}</p>
+                        <time className="mt-2 block text-[10px] text-slate-400">
+                          {item.created_at ? new Date(item.created_at).toLocaleString('vi-VN') : item.event_type}
+                        </time>
+                      </div>
+                      {!item.is_read && (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            void markNotificationRead(item.id);
+                          }}
+                          className="text-xs font-semibold text-[#176b52]"
+                        >
+                          Đã đọc
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
               </section>
             )
           )}
@@ -1131,6 +1295,7 @@ export default function FreshFlow() {
               activePeerId={activePeerId}
               messages={chatMessages}
               onSelectPeer={handleSelectPeer}
+              onNewConversation={peer => handleSelectPeer(peer.id, peer)}
               onSendMessage={handleSendChatMessage}
             />
           )}

@@ -36,6 +36,7 @@ async def broadcast_notification(payload: BroadcastNotificationIn, db: Session, 
             title=payload.title,
             body=payload.body,
             event_type="system.broadcast",
+            link=payload.link or "",
         )
         for u in users
     ]

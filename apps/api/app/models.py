@@ -149,6 +149,7 @@ class Post(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     post_type: Mapped[str] = mapped_column(String(50), default="PRODUCT_INTRO")  # PRODUCT_INTRO, DAILY_SPECIAL, PROMOTION
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"), nullable=True)
+    product_ids: Mapped[str] = mapped_column(String(512), default="")
     image_urls: Mapped[str] = mapped_column(Text, default="")
     quantity_limit: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
     target_audience: Mapped[str] = mapped_column(String(50), default="ALL")  # ALL, INDIVIDUAL, GROUP, COLLECTIVE
@@ -276,6 +277,7 @@ class Notification(Base):
     title: Mapped[str] = mapped_column(String(160))
     body: Mapped[str] = mapped_column(Text, default="")
     event_type: Mapped[str] = mapped_column(String(60), default="general")
+    link: Mapped[str] = mapped_column(String(255), default="")
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

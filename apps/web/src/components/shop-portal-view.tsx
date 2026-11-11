@@ -21,6 +21,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import type { Order, Product, ProductReview, User } from '@/types/domain';
 import ProductPhoto from '@/components/product-photo';
+import { getOrderVisualMeta, sortOrdersByPriority } from '@/features/customer/page-model';
 
 interface ShopPortalViewProps {
   currentUser: User;
@@ -67,7 +68,7 @@ export default function ShopPortalView({
 
   // Shop filtered data (Strict isolation per shop)
   const shopProducts = products.filter(p => p.shop_id === currentUser.id);
-  const shopOrders = orders.filter(o => o.shop_id === currentUser.id);
+  const shopOrders = sortOrdersByPriority(orders.filter(o => o.shop_id === currentUser.id));
   const completedOrders = shopOrders.filter(o => o.status === 'Hoàn thành' || o.status === 'COMPLETED');
   const totalShopRevenue = completedOrders.reduce((sum, o) => sum + (o.total || 0), 0);
 
@@ -271,21 +272,26 @@ export default function ShopPortalView({
               })
               .map(order => {
                 const isCentral = order.delivery === 'Điểm giao tập trung';
-                const canCancel = !['Hoàn thành', 'COMPLETED', 'Đã hủy', 'CANCELLED', 'Đang giao', 'DELIVERING'].includes(order.status);
+                const canCancel = !['Hoàn thành', 'COMPLETED', 'Đã hủy', 'CANCELLED', 'Từ chối', 'REJECTED', 'Đang giao', 'DELIVERING'].includes(order.status);
+                const visual = getOrderVisualMeta(order.status);
                 return (
                   <div
                     key={order.id}
-                    className="flex flex-col justify-between rounded-2xl border border-[#e8ede8] bg-white p-4 shadow-sm md:flex-row md:items-center gap-4"
+                    className={`flex flex-col justify-between rounded-2xl border border-[#e8ede8] border-l-4 p-4 shadow-sm md:flex-row md:items-center gap-4 transition ${visual.border} ${
+                      visual.muted ? 'bg-slate-100/80 opacity-75' : 'bg-white hover:shadow-md'
+                    }`}
                   >
                     <div className="space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <Link
                           href={`/orders/${encodeURIComponent(order.id)}`}
-                          className="font-extrabold text-[#176b52] hover:underline"
+                          className={`font-extrabold hover:underline ${
+                            visual.muted ? 'line-through text-slate-500' : 'text-[#176b52]'
+                          }`}
                         >
                           #{order.id}
                         </Link>
-                        <span className="rounded-full bg-[#f0f5f2] px-2.5 py-0.5 text-[10px] font-bold text-[#176b52]">
+                        <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${visual.badge}`}>
                           {order.status}
                         </span>
                         <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${isCentral ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-blue-50 text-blue-700'}`}>
@@ -294,8 +300,16 @@ export default function ShopPortalView({
                         <span className="text-[11px] text-slate-400">{order.date}</span>
                       </div>
                       <div className="text-xs text-[#627369]">
-                        Khách hàng: <b>{order.customer}</b> · Mặt hàng: <b>{order.items}</b> · Tổng tiền: <b className="text-[#176b52]">{money(order.total)}</b>
+                        Khách hàng: <b>{order.customer}</b> · Mặt hàng: <b>{order.items}</b> · Tổng tiền: <b className={visual.muted ? 'text-slate-500' : 'text-[#176b52]'}>{money(order.total)}</b>
                       </div>
+                      {order.shipper_name && (
+                        <div className="inline-flex flex-wrap items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50/70 px-2.5 py-1 text-[11px] font-semibold text-blue-800">
+                          <FontAwesomeIcon icon={faMotorcycle} className="text-[10px]" />
+                          <span>Shipper nhận đơn: <b>{order.shipper_name}</b></span>
+                          {order.shipper_phone && <span>· SĐT: <b>{order.shipper_phone}</b></span>}
+                          {order.shipper_vehicle && <span>· Xe: {order.shipper_vehicle}</span>}
+                        </div>
+                      )}
                       {order.lines && order.lines.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 pt-0.5">
                           {order.lines.map((line, idx) => (

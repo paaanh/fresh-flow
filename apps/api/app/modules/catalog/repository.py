@@ -18,7 +18,7 @@ def create_category(db: Session, category: Category):
 
 
 def list_products(db: Session, category_id: int | None = None):
-    query = select(Product).where(Product.is_active.is_(True)).order_by(Product.name)
+    query = select(Product).where(Product.is_active.is_(True)).order_by(Product.id.desc())
     if category_id is not None:
         query = query.where(Product.category_id == category_id)
     return db.scalars(query).all()

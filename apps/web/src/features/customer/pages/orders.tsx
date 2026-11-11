@@ -3,11 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faClockRotateLeft, faEllipsis, faReply, faStar } from '@fortawesome/free-solid-svg-icons';
+import { faClockRotateLeft, faEllipsis, faMotorcycle, faPhone, faReply, faStar } from '@fortawesome/free-solid-svg-icons';
 import OrderItems from '@/components/order-items';
 import OrderStatusControl, { type UpdateOrderStatus } from '@/components/order-status-control';
 import { Badge } from './shared-ui';
 import { freshflow } from '@/lib/api';
+import { getOrderVisualMeta, sortOrdersByPriority } from '@/features/customer/page-model';
 import type { Order } from '@/types/domain';
 
 const statusViMap: Record<string, string> = {
@@ -85,7 +86,7 @@ export function OrderDetailView({
 
   useEffect(() => {
     loadOrderExtras();
-  }, [order.apiId, order.status]);
+  }, [order.apiId, order.status, order.shipper_id, order.shipper_name, order.payment_status, order.paid_amount]);
 
   const handleProductReviewSubmit = async (productId: number) => {
     if (!order.apiId || !productId) return;
@@ -213,6 +214,68 @@ export function OrderDetailView({
             </div>
           )}
         </section>
+
+        {/* THÔNG TIN TÀI XẾ (SHIPPER) PHỤ TRÁCH ĐƠN HÀNG */}
+        {(order.shipper_id || order.shipper_name || order.delivery !== 'Điểm giao tập trung') && (
+          <section className="panel p-5 border border-blue-200 bg-blue-50/40">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
+                  <FontAwesomeIcon icon={faMotorcycle} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-[#1a2e24]">
+                    Thông tin Tài xế (Shipper) phụ trách đơn hàng
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {order.shipper_id || order.shipper_name
+                      ? 'Shipper đã nhận đơn — Người nhận và Shop có thể theo dõi chi tiết bên dưới'
+                      : 'Đơn hàng giao tận nơi — Đang chờ chỉ định hoặc chờ Shipper nhận đơn'}
+                  </p>
+                </div>
+              </div>
+              <span
+                className={`rounded-full border px-3 py-1 text-[11px] font-bold ${
+                  getOrderVisualMeta(order.status).badge
+                }`}
+              >
+                {order.status}
+              </span>
+            </div>
+
+            {order.shipper_id || order.shipper_name ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-3 text-xs">
+                <div className="rounded-xl border border-blue-100 bg-white p-3">
+                  <div className="text-[10px] font-bold uppercase text-slate-400">Họ tên Shipper</div>
+                  <div className="mt-1 font-extrabold text-[#1e2d25]">
+                    {order.shipper_name || `Shipper #${order.shipper_id}`}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-blue-100 bg-white p-3">
+                  <div className="text-[10px] font-bold uppercase text-slate-400">Số điện thoại & Phương tiện</div>
+                  <div className="mt-1 font-bold text-blue-700 flex items-center gap-1.5">
+                    <FontAwesomeIcon icon={faPhone} className="text-[10px]" />
+                    <span>{order.shipper_phone || '0900000003'}</span>
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-slate-500">
+                    {order.shipper_vehicle || 'Xe máy giao hàng chuyên dụng'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-blue-100 bg-white p-3">
+                  <div className="text-[10px] font-bold uppercase text-slate-400">Số tiền thu hộ (COD) / Thanh toán</div>
+                  <div className="mt-1 font-extrabold text-[#176b52]">{money(order.total)}</div>
+                  <div className="mt-0.5 text-[11px] text-slate-500">
+                    {order.status === 'Hoàn thành' ? 'Đã giao & đối soát thành công' : 'Thanh toán khi nhận hàng'}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-xl bg-white/80 p-3 text-xs text-slate-600">
+                Ngay khi Shipper bấm <b>Nhận đơn</b> hoặc được Cửa hàng phân công, tên tài xế, số điện thoại liên hệ và biển số xe sẽ hiển thị trực tiếp tại đây cho khách hàng.
+              </div>
+            )}
+          </section>
+        )}
 
         {/* ĐÁNH GIÁ ĐƠN HÀNG & PHẢN HỒI CỦA SHOP (Khi đơn hàng đã hoàn thành) */}
         {order.status === 'Hoàn thành' && (
@@ -482,12 +545,13 @@ export function OrderTable({
   const router = useRouter();
   const pathname = usePathname();
   const adminPrefix = pathname.startsWith('/admin') ? '/admin' : '';
+  const sortedOrders = sortOrdersByPriority(orders);
   return (
     <div className="overflow-auto">
       <table className="w-full min-w-[720px] text-left text-xs">
         <thead className="bg-white text-[10px] uppercase tracking-wide text-slate-400">
           <tr>
-            {['Mã đơn hàng', 'Khách hàng', 'Thời gian', 'Tổng tiền', 'Trạng thái', 'Tác vụ'].map(x => (
+            {['Mã đơn hàng', 'Khách hàng & Shipper', 'Thời gian', 'Tổng tiền', 'Trạng thái', 'Tác vụ'].map(x => (
               <th key={x} className="px-5 py-3 font-bold">
                 {x}
               </th>
@@ -495,15 +559,21 @@ export function OrderTable({
           </tr>
         </thead>
         <tbody>
-          {orders.map(o => {
+          {sortedOrders.map(o => {
             const canCancel = !admin && updateStatus && (o.status === 'Chờ xác nhận' || o.status === 'Chờ duyệt');
+            const visual = getOrderVisualMeta(o.status);
             return (
-              <tr key={o.id} className="border-t border-[#f0f2ef] hover:bg-slate-50/70">
+              <tr
+                key={o.id}
+                className={`border-t border-[#f0f2ef] border-l-4 transition ${visual.border} ${
+                  visual.muted ? `${visual.rowBg} opacity-75` : `${visual.rowBg} hover:bg-slate-50/90`
+                }`}
+              >
                 <td className="px-5 py-3 font-bold text-[#39614a]">
                   <button
                     type="button"
                     onClick={() => router.push(`${adminPrefix}/orders/${encodeURIComponent(o.id)}`)}
-                    className="hover:underline text-left"
+                    className={`hover:underline text-left ${visual.muted ? 'line-through text-slate-500' : ''}`}
                   >
                     {o.id}
                   </button>
@@ -511,17 +581,25 @@ export function OrderTable({
                 </td>
                 <td className="px-5">
                   <div className="font-semibold">{o.customer}</div>
-                  <div className="mt-1 text-[10px] text-slate-400">{o.items}</div>
+                  <div className="mt-0.5 text-[10px] text-slate-400">{o.items}</div>
+                  {o.shipper_name && (
+                    <div className="mt-1 inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                      <FontAwesomeIcon icon={faMotorcycle} className="text-[9px]" />
+                      <span>Shipper: {o.shipper_name} {o.shipper_phone ? `(${o.shipper_phone})` : ''}</span>
+                    </div>
+                  )}
                 </td>
                 <td className="px-5 text-slate-500">{o.date}</td>
-                <td className="px-5 font-bold">{money(o.total)}</td>
+                <td className={`px-5 font-bold ${visual.muted ? 'text-slate-500' : 'text-[#176b52]'}`}>{money(o.total)}</td>
                 <td className="whitespace-nowrap px-5 py-3 align-middle">
-                  <Badge tone={statusTone(o.status)}>{o.status}</Badge>
+                  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-bold ${visual.badge}`}>
+                    {o.status}
+                  </span>
                 </td>
                 <td className="px-5 py-3 align-middle">
-                  <div className="flex items-center justify-end gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     {admin && updateStatus && (
-                      <div className="w-[310px] shrink-0">
+                      <div className="shrink-0">
                         <OrderStatusControl id={o.id} status={o.status} updateStatus={updateStatus} />
                       </div>
                     )}
@@ -547,7 +625,7 @@ export function OrderTable({
               </tr>
             );
           })}
-          {orders.length === 0 && (
+          {sortedOrders.length === 0 && (
             <tr>
               <td colSpan={6} className="p-8 text-center text-xs text-slate-400">
                 Chưa có đơn hàng nào trong mục này.

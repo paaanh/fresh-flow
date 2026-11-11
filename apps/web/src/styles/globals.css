@@ -54,14 +54,8 @@ button {
   font-weight: 700;
 }
 
-@media (max-width: 760px) {
-  .desktop-sidebar {
-    display: none;
-  }
-  .mobile-bottom {
-    display: flex !important;
-  }
+@media (max-width: 1023px) {
   .main-content {
-    padding: 20px 16px 100px !important;
+    padding-left: 0 !important;
   }
 }

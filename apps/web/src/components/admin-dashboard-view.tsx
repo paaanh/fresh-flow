@@ -171,19 +171,26 @@ export default function AdminDashboardView({
             </span>
           </div>
 
-          <div className="mt-6 flex h-48 items-end gap-3 pt-6">
+          <div className="mt-6 flex h-52 items-end gap-2.5 pt-8 sm:gap-3">
             {summary.orders_by_date.map((item, idx) => {
-              const heightPercent = Math.max(8, Math.round((item.revenue / maxRevenue) * 100));
+              const hasRevenue = item.revenue > 0;
+              const heightPercent = hasRevenue ? Math.max(10, Math.round((item.revenue / maxRevenue) * 100)) : 4;
               return (
-                <div key={idx} className="group relative flex flex-1 flex-col items-center gap-2">
-                  <div className="absolute -top-7 hidden rounded bg-slate-900 px-2 py-0.5 text-[9px] font-bold text-white group-hover:block">
-                    {money(item.revenue)} ({item.orders} đơn)
+                <div key={idx} className="group relative flex h-full flex-1 flex-col items-center justify-end gap-2">
+                  <div className="pointer-events-none absolute -top-2 z-10 hidden whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] font-bold text-white shadow-md group-hover:block">
+                    {money(item.revenue)} · {item.orders} đơn
                   </div>
-                  <div
-                    style={{ height: `${heightPercent}%` }}
-                    className="w-full rounded-t-lg bg-gradient-to-t from-[#176b52] to-[#43967b] transition hover:brightness-110"
-                  />
-                  <span className="text-[10px] text-[#85948b]">{item.date}</span>
+                  <div className="flex w-full flex-1 items-end">
+                    <div
+                      style={{ height: `${heightPercent}%` }}
+                      className={`w-full rounded-t-lg transition-all duration-300 ${
+                        hasRevenue
+                          ? 'bg-gradient-to-t from-[#176b52] to-[#43967b] group-hover:brightness-110'
+                          : 'bg-[#e6ece8] group-hover:bg-[#cfd9d2]'
+                      }`}
+                    />
+                  </div>
+                  <span className="text-[10px] font-medium text-[#85948b]">{item.date}</span>
                 </div>
               );
             })}

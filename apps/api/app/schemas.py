@@ -269,6 +269,8 @@ class OrderOut(BaseModel):
     shop_name: str | None = None
     shipper_id: int | None = None
     shipper_name: str | None = None
+    shipper_phone: str | None = None
+    shipper_vehicle: str | None = None
     status: str
     delivery_type: str
     delivery_address: str
@@ -318,14 +320,21 @@ class NotificationOut(ORMModel):
     title: str
     body: str
     event_type: str
+    link: str = ""
     is_read: bool
     created_at: datetime
+
+    @field_validator("link", mode="before")
+    @classmethod
+    def normalize_notif_link(cls, v):
+        return "" if v is None else v
 
 
 class BroadcastNotificationIn(BaseModel):
     title: str = Field(min_length=2, max_length=160)
     body: str = Field(min_length=2, max_length=2000)
     target_role: str | None = Field(default=None)
+    link: str = ""
 
 
 class VatConfigIn(BaseModel):
@@ -349,6 +358,8 @@ class PostIn(BaseModel):
     content: str = ""
     post_type: str = "PRODUCT_INTRO"  # PRODUCT_INTRO, DAILY_SPECIAL, PROMOTION
     product_id: int | None = None
+    product_ids: list[int] = Field(default_factory=list)
+    new_products: list[dict] = Field(default_factory=list)
     image_urls: str = ""
     quantity_limit: Decimal | None = None
     target_audience: str = "ALL"  # ALL, INDIVIDUAL, GROUP, COLLECTIVE
@@ -369,11 +380,14 @@ class PostOut(BaseModel):
     content: str = ""
     post_type: str
     product_id: int | None = None
+    product_ids: list[int] = Field(default_factory=list)
+    products_info: list[dict] = Field(default_factory=list)
     product_name: str | None = None
     image_urls: str = ""
     quantity_limit: Decimal | None = None
     target_audience: str
     target_customer_group: str | None = None
+    original_price: Decimal | None = None
     sale_price: Decimal | None = None
     effective_price: Decimal | None = None
     group_prices: str = ""

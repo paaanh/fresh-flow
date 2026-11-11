@@ -152,6 +152,7 @@ async def create_order(db: Session, payload: OrderCreateIn, user: User) -> Order
     )
 
     # Notify Shop and Admin
+    order_link = f"/orders/{order.order_number}"
     if detected_shop_id:
         add_notification(
             db,
@@ -159,6 +160,7 @@ async def create_order(db: Session, payload: OrderCreateIn, user: User) -> Order
             "Có đơn hàng mới!",
             f"Đơn hàng {order.order_number} vừa được đặt, tổng tiền: {total:,.0f}đ",
             "order.new",
+            link=order_link,
         )
 
     # Notify Admins
@@ -170,6 +172,7 @@ async def create_order(db: Session, payload: OrderCreateIn, user: User) -> Order
             "Đơn hàng mới trên hệ thống",
             f"Đơn {order.order_number} từ {user.full_name} trị giá {total:,.0f}đ",
             "order.new",
+            link=f"/admin/orders/{order.order_number}",
         )
 
     db.commit()
@@ -179,6 +182,20 @@ async def create_order(db: Session, payload: OrderCreateIn, user: User) -> Order
         await manager.send_user(detected_shop_id, event("notification.created", {"event_type": "order.new", "order_id": order.id}))
     for admin in admins:
         await manager.send_user(admin.id, event("notification.created", {"event_type": "order.new", "order_id": order.id}))
+    await manager.broadcast(
+        event(
+            "order.new",
+            {
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "status": order.status,
+                "shop_id": order.shop_id,
+                "user_id": order.user_id,
+            },
+        )
+    )
+    for item in order.items:
+        await manager.broadcast(event("inventory.updated", {"product_id": item.product_id}))
     return order
 
 
@@ -344,12 +361,14 @@ async def change_order_status(
     vn_status = status_vn_map.get(new_status, new_status)
 
     # Notification to customer
+    order_link = f"/orders/{order.order_number}"
     add_notification(
         db,
         order.user_id,
         f"Đơn hàng {order.order_number}: {vn_status}",
         f"Đơn hàng của bạn hiện đang ở trạng thái: {vn_status}. {payload.note}",
         "order.status_changed",
+        link=order_link,
     )
 
     # If completed, notify Shop and Admin
@@ -361,6 +380,7 @@ async def change_order_status(
                 f"Đơn hàng {order.order_number} đã giao thành công!",
                 f"Khách hàng đã nhận hàng và hoàn tất thanh toán {order.total:,.0f}đ",
                 "order.completed",
+                link=order_link,
             )
         admins = db.scalars(select(User).where(User.role == "ADMIN")).all()
         for adm in admins:
@@ -370,6 +390,7 @@ async def change_order_status(
                 f"Đơn hàng {order.order_number} giao thành công",
                 f"Shipper đã hoàn tất giao đơn {order.order_number}",
                 "order.completed",
+                link=f"/admin/orders/{order.order_number}",
             )
 
     product_ids = {item.product_id for item in order.items}
@@ -380,12 +401,25 @@ async def change_order_status(
     # WebSocket events
     await manager.send_user(
         order.user_id,
-        event("order.status_changed", {"order_id": order.id, "status": order.status, "status_text": vn_status}),
+        event("order.status_changed", {"order_id": order.id, "order_number": order.order_number, "status": order.status, "status_text": vn_status}),
     )
     if order.shop_id:
         await manager.send_user(order.shop_id, event("notification.created", {"event_type": "order.status_changed", "order_id": order.id, "status": order.status}))
     if order.shipper_id:
-        await manager.send_user(order.shipper_id, event("order.status_changed", {"order_id": order.id, "status": order.status, "status_text": vn_status}))
+        await manager.send_user(order.shipper_id, event("order.status_changed", {"order_id": order.id, "order_number": order.order_number, "status": order.status, "status_text": vn_status}))
+
+    await manager.broadcast(
+        event(
+            "order.status_changed",
+            {
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "status": order.status,
+                "status_text": vn_status,
+                "actor_role": operator.role,
+            },
+        )
+    )
 
     for pid in product_ids:
         await manager.broadcast(event("inventory.updated", {"product_id": pid}))
@@ -431,14 +465,36 @@ async def assign_shipper_to_order(
         "Bạn có đơn hàng mới cần giao!",
         f"Đơn {order.order_number} đã được phân công cho bạn. Điểm giao: {order.delivery_address}",
         "order.assigned",
+        link="/shipper",
+    )
+    add_notification(
+        db,
+        order.user_id,
+        f"Đơn hàng {order.order_number} đã có Shipper nhận giao",
+        f"Tài xế {shipper.full_name} ({shipper.phone or 'Đang cập nhật'}) đã nhận giao đơn của bạn.",
+        "order.assigned",
+        link=f"/orders/{order.order_number}",
     )
 
     db.commit()
     db.refresh(order)
     repository.enrich_order_names(db, order)
-    await manager.send_user(shipper.id, event("order.assigned", {"order_id": order.id, "status": order.status}))
+    await manager.send_user(shipper.id, event("order.assigned", {"order_id": order.id, "order_number": order.order_number, "status": order.status}))
+    await manager.send_user(order.user_id, event("order.status_changed", {"order_id": order.id, "order_number": order.order_number, "status": order.status}))
     if order.shop_id:
         await manager.send_user(order.shop_id, event("notification.created", {"event_type": "order.assigned", "order_id": order.id}))
+    await manager.broadcast(
+        event(
+            "order.assigned",
+            {
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "shipper_id": shipper.id,
+                "shipper_name": shipper.full_name,
+                "status": order.status,
+            },
+        )
+    )
     return order
 
 

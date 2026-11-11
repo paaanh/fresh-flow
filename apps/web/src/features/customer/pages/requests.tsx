@@ -35,8 +35,24 @@ export function RequestsView({
   const openQuoteModal = (req: ProductRequest) => {
     setQuotingReq(req);
     setQuotePrice(req.quoted_price || 45000);
-    setQuoteStatus('Đã báo giá');
+    const nextDefaultStatus =
+      req.status === 'Mới'
+        ? 'Đã báo giá'
+        : req.status === 'Đã báo giá'
+          ? 'Đang xử lý'
+          : req.status === 'Đang xử lý'
+            ? 'Hoàn tất'
+            : req.status;
+    setQuoteStatus(nextDefaultStatus);
     setQuoteNote(req.admin_response || `Cửa hàng đã tìm được nguồn hàng ${req.name} tươi ngon trong ngày.`);
+  };
+
+  const getStepIndex = (status: string) => {
+    if (status === 'Mới') return 0;
+    if (status === 'Đã báo giá') return 1;
+    if (status === 'Đang xử lý') return 2;
+    if (status === 'Hoàn tất') return 3;
+    return -1;
   };
 
   const handleQuoteSubmit = (e: React.FormEvent) => {
@@ -130,7 +146,7 @@ export function RequestsView({
                         <span className="text-[11px] text-slate-400">Đang chờ Shop/Admin phản hồi</span>
                       )}
                     </td>
-                    <td className="px-5">
+                    <td className="px-5 py-3">
                       <Badge
                         tone={
                           request.status === 'Mới'
@@ -144,16 +160,72 @@ export function RequestsView({
                       >
                         {request.status}
                       </Badge>
+                      {/* Thanh tiến độ 4 bước */}
+                      {request.status !== 'Từ chối' && (
+                        <div className="mt-2 flex items-center gap-1">
+                          {['Đã gửi', 'Báo giá', 'Chuẩn bị', 'Hoàn tất'].map((stepLabel, idx) => {
+                            const activeIdx = getStepIndex(request.status);
+                            const done = idx <= activeIdx;
+                            return (
+                              <div key={stepLabel} className="flex items-center gap-1">
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                                    done
+                                      ? 'bg-emerald-100 text-[#176b52]'
+                                      : 'bg-slate-100 text-slate-400'
+                                  }`}
+                                >
+                                  {idx + 1}. {stepLabel}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </td>
-                    <td className="px-5">
+                    <td className="px-5 py-3">
                       {canManage ? (
-                        <button
-                          type="button"
-                          onClick={() => openQuoteModal(request)}
-                          className="rounded-xl bg-[#176b52] px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-[#125340]"
-                        >
-                          {request.status === 'Mới' ? 'Báo giá & Phản hồi' : 'Cập nhật báo giá'}
-                        </button>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openQuoteModal(request)}
+                            className="rounded-xl bg-[#176b52] px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-[#125340]"
+                          >
+                            {request.status === 'Mới' ? 'Báo giá & Phản hồi' : 'Cập nhật báo giá'}
+                          </button>
+                          {request.status === 'Đã báo giá' && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                update(
+                                  request.id,
+                                  'Đang xử lý',
+                                  request.quoted_price || undefined,
+                                  request.admin_response || 'Đang chuẩn bị nguồn hàng cho khách'
+                                )
+                              }
+                              className="rounded-xl bg-indigo-600 px-2.5 py-1.5 text-[11px] font-bold text-white shadow-sm hover:bg-indigo-700"
+                            >
+                              → Chuẩn bị hàng
+                            </button>
+                          )}
+                          {(request.status === 'Đã báo giá' || request.status === 'Đang xử lý') && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                update(
+                                  request.id,
+                                  'Hoàn tất',
+                                  request.quoted_price || undefined,
+                                  request.admin_response || 'Đã nhập hàng lên kệ thành công'
+                                )
+                              }
+                              className="rounded-xl bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold text-white shadow-sm hover:bg-emerald-700"
+                            >
+                              ✓ Hoàn tất lên kệ
+                            </button>
+                          )}
+                        </div>
                       ) : request.status === 'Đã báo giá' ? (
                         <div className="flex flex-wrap gap-1.5">
                           <button

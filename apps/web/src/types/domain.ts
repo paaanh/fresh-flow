@@ -68,6 +68,8 @@ export type Order = {
   shop_name?: string | null;
   shipper_id?: number | null;
   shipper_name?: string | null;
+  shipper_phone?: string | null;
+  shipper_vehicle?: string | null;
   note?: string;
   lines?: OrderLine[];
   createdAt?: string;
@@ -86,6 +88,19 @@ export type ProductRequest = {
   quoted_price?: number | null;
 };
 
+export type PostProductInfo = {
+  id: number;
+  name: string;
+  unit: string;
+  category_name?: string;
+  base_price: number;
+  sale_price?: number;
+  effective_price: number;
+  available_quantity: number;
+  image_url?: string;
+  group_prices?: Record<string, number>;
+};
+
 export type Post = {
   id: number;
   author_id: number;
@@ -95,11 +110,14 @@ export type Post = {
   content: string;
   post_type: 'PRODUCT_INTRO' | 'DAILY_SPECIAL' | 'PROMOTION';
   product_id?: number | null;
+  product_ids?: number[];
+  products_info?: PostProductInfo[];
   product_name?: string;
   image_urls?: string;
   quantity_limit?: number | null;
   target_audience: 'ALL' | 'INDIVIDUAL' | 'GROUP' | 'COLLECTIVE' | 'CUSTOM_GROUP';
   target_customer_group?: string | null;
+  original_price?: number | null;
   sale_price?: number | null;
   effective_price?: number | null;
   group_prices?: string;
