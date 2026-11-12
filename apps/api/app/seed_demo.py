@@ -1,7 +1,8 @@
 """Create repeatable demo data for local FreshFlow development."""
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+import json
 
 from sqlalchemy import select
 
@@ -19,6 +20,10 @@ from app.models import (
     Order,
     OrderItem,
     OrderStatusHistory,
+    Post,
+    PostComment,
+    PostItem,
+    PostLike,
     PriceRule,
     Product,
     ProductRequest,
@@ -48,7 +53,7 @@ LEGACY_EMAILS = {
 def get_user(db, email: str, name: str, role: str, group: str, phone: str, password: str) -> User:
     user = db.scalar(select(User).where(User.email == email))
     if user is None:
-        user = db.scalar(select(User).where(User.email == LEGACY_EMAILS[email]))
+        user = db.scalar(select(User).where(User.email == LEGACY_EMAILS.get(email, email)))
         if user is not None:
             user.email = email
     if user is None:
@@ -113,17 +118,11 @@ def ensure_batch(db, product: Product, batch_date: datetime, quantity: str) -> I
     return batch
 
 
-def ensure_price(db, product: Product, group: str, price: str) -> None:
-    rule = db.scalar(
-        select(PriceRule).where(
-            PriceRule.product_id == product.id,
-            PriceRule.customer_group == group,
-        )
-    )
-    if rule is None:
-        db.add(PriceRule(product_id=product.id, customer_group=group, unit_price=Decimal(price)))
-    else:
-        rule.unit_price = Decimal(price)
+def clear_legacy_prices(db, product: Product) -> None:
+    """Group prices now come from each customer group's discount % (and per-post programmes).
+    Fixed per-product price rules from older demo data would silently override that, so drop them."""
+    for rule in db.scalars(select(PriceRule).where(PriceRule.product_id == product.id)).all():
+        db.delete(rule)
 
 
 def ensure_slot(db, name: str, group: str, fee: str) -> DeliverySlot:
@@ -171,7 +170,7 @@ def ensure_order(db, *, number: str, user: User, admin: User, status: str,
     price = Decimal(unit_price)
     subtotal = qty * price
     vat_rate = Decimal("0.0800")
-    vat_amount = (subtotal * vat_rate).quantize(Decimal("0.01"))
+    vat_amount = (subtotal * vat_rate).quantize(Decimal("1"), rounding=ROUND_HALF_UP)  # VND has no fractions
     total = subtotal + vat_amount + slot.fee
     paid_amount = total if status == "COMPLETED" else Decimal("0.00")
     payment_status = "PAID" if status == "COMPLETED" else "UNPAID"
@@ -239,7 +238,9 @@ def ensure_request(db, user: User, product_name: str, description: str, status: 
     request.quoted_price = Decimal(quoted_price) if quoted_price else None
 
 
-def ensure_notification(db, user: User, title: str, body: str, event_type: str, is_read: bool = False) -> None:
+def ensure_notification(
+    db, user: User, title: str, body: str, event_type: str, is_read: bool = False, link: str = ""
+) -> None:
     notification = db.scalar(
         select(Notification).where(
             Notification.user_id == user.id,
@@ -253,14 +254,136 @@ def ensure_notification(db, user: User, title: str, body: str, event_type: str, 
             title=title,
             body=body,
             event_type=event_type,
+            link=link,
             is_read=is_read,
         ))
+    elif link and not notification.link:
+        notification.link = link
 
 
 def ensure_moderation_term(db, term: str) -> None:
     existing = db.scalar(select(ModerationTerm).where(ModerationTerm.term == term))
     if existing is None:
         db.add(ModerationTerm(term=term, is_active=True))
+
+
+def ensure_sample_post(db, shop: User, products: list[Product]) -> Post:
+    title = "Thu hoạch sáng nay: Combo Rau Củ VietGAP & Trái Cây Tươi Đà Lạt"
+    existing = db.scalar(select(Post).where(Post.title == title))
+    product_ids = [p.id for p in products if p.id]
+    payload_images = ", ".join(
+        [
+            "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=80",
+            "https://images.unsplash.com/photo-1518843875459-f738682238a6?auto=format&fit=crop&w=900&q=80",
+            "https://images.unsplash.com/photo-1610832958506-aa56368176cf?auto=format&fit=crop&w=900&q=80",
+        ]
+    )
+    payload_group_prices = json.dumps(
+        {
+            "STUDENT": 35000,
+            "WORKING": 39000,
+            "GROUP_A": 36000,
+            "GROUP_B": 38000,
+            "COLLECTIVE": 32000,
+        }
+    )
+    if existing is None:
+        existing = Post(
+            author_id=shop.id,
+            title=title,
+            content=(
+                "Chuyến xe nông sản sáng nay từ Đà Lạt đã cập bến kho FreshFlow!\n"
+                "• Đầy đủ rau cải kale hữu cơ, bơ sáp chín tự nhiên, chuối tiêu thơm ngọt và trứng gà sạch.\n"
+                "• Bấm trực tiếp vào bài đăng hoặc ảnh để mở bảng chọn mua nhiều mặt hàng cùng lúc với giá ưu đãi riêng theo nhóm của bạn."
+            ),
+            post_type="DAILY_SPECIAL",
+            product_id=product_ids[0] if product_ids else None,
+            product_ids=json.dumps(product_ids),
+            image_urls=payload_images,
+            quantity_limit=200,
+            target_audience="ALL",
+            target_customer_group="STUDENT",
+            sale_price=Decimal("39000"),
+            group_prices=payload_group_prices,
+            delivery_time_text="Giao nhanh trong ngày (11:30 - 18:30)",
+            is_active=True,
+        )
+        db.add(existing)
+        db.flush()
+    else:
+        existing.product_id = product_ids[0] if product_ids else existing.product_id
+        existing.product_ids = json.dumps(product_ids)
+        existing.is_active = True
+        db.flush()
+    return existing
+
+
+ALL_GROUPS_POST_TITLE = "Tuần lễ nông sản Đà Lạt — ưu đãi cho mọi nhóm khách hàng"
+# Extra demo customers so every customer group can take part in the conversation
+GROUP_CUSTOMERS = [
+    ("groupa@freshflow.example.com", "Lê Thu Hà", "GROUP_A", "0900000104"),
+    ("groupb@freshflow.example.com", "Phạm Quốc Bảo", "GROUP_B", "0900000105"),
+    ("collective@freshflow.example.com", "Đỗ Thanh Tâm", "COLLECTIVE", "0900000106"),
+]
+
+
+def ensure_all_groups_post(db, shop: User, products: list[Product], customers: list[User]) -> Post:
+    """A programme open to every customer group (each with its own % off), with comments from
+    customers of different groups so the group badge next to commenters can be seen."""
+    post = db.scalar(select(Post).where(Post.title == ALL_GROUPS_POST_TITLE))
+    if post is None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        post = Post(
+            author_id=shop.id,
+            title=ALL_GROUPS_POST_TITLE,
+            content=(
+                "Cả tuần này FreshFlow mở bán rau, trái cây và trứng sạch từ Đà Lạt cho TẤT CẢ các nhóm khách hàng.\n"
+                "• Mỗi nhóm có mức giảm riêng: Sinh viên −10%, Người đi làm −8%, Cư dân KĐT A −12%, Trường học/Cơ quan B −15%, Khách tập thể −20%.\n"
+                "• Bơ sáp đang Sale chỉ 59.000đ/kg, số lượng có hạn.\n"
+                "Có câu hỏi về nguồn hàng, cứ bình luận bên dưới nhé!"
+            ),
+            post_type="PROMOTION",
+            image_urls=", ".join([
+                "https://images.unsplash.com/photo-1488459716781-31db52582fe9?auto=format&fit=crop&w=900&q=80",
+                "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=900&q=80",
+            ]),
+            target_audience="ALL",
+            target_customer_group=None,
+            group_discounts=json.dumps({"STUDENT": 10, "WORKING": 8, "GROUP_A": 12, "GROUP_B": 15, "COLLECTIVE": 20}),
+            order_start_at=now - timedelta(hours=3),
+            order_end_at=now + timedelta(days=7),
+            delivery_time_text="Giao trong ngày (11:30 - 18:30)",
+            is_active=True,
+            created_at=now - timedelta(hours=3),
+        )
+        db.add(post)
+        db.flush()
+        limits = {"Rau cải kale": ("100", None), "Bơ sáp": ("60", "59000"), "Chuối tiêu": ("120", None), "Trứng gà sạch": ("150", None)}
+        for position, product in enumerate(products):
+            limit, sale = limits.get(product.name, (None, None))
+            db.add(PostItem(post_id=post.id, product_id=product.id, position=position,
+                            quantity_limit=Decimal(limit) if limit else None,
+                            sale_price=Decimal(sale) if sale else None))
+        post.product_id = products[0].id if products else None
+        post.product_ids = json.dumps([p.id for p in products])
+        conversation = [
+            (0, "Sinh viên KTX khu A có được giao tập trung không shop?"),
+            (None, "Có bạn nhé, giao tập trung KTX khu A lúc 11:30 – 12:30, miễn phí giao hàng."),
+            (1, "Trứng gà này là gà thả vườn hay công nghiệp vậy shop?"),
+            (2, "Cư dân KĐT A đặt chung 10 hộp trứng được giảm thêm không ạ?"),
+            (3, "Trường mình đặt rau cho bếp mỗi tuần, shop có xuất hóa đơn VAT không?"),
+            (4, "Bên mình đặt 30 kg chuối cho cả văn phòng, giao một lần được không?"),
+        ]
+        for offset, (who, text) in enumerate(conversation):
+            author = shop if who is None else customers[who]
+            db.add(PostComment(post_id=post.id, user_id=author.id, content=text,
+                               created_at=now - timedelta(minutes=150 - 22 * offset)))
+        for customer in customers:
+            db.add(PostLike(post_id=post.id, user_id=customer.id))
+        db.flush()
+    else:
+        post.is_active = True
+    return post
 
 
 def ensure_audit(db, admin: User, action: str, entity_type: str, entity_id: str, details: str) -> None:
@@ -307,9 +430,8 @@ def main() -> None:
             get_product(db, name="Trứng gà sạch", category=staples, description="Trứng gà đóng hộp 10 quả.", unit="hộp", price="35000", image="http://localhost:3000/images/eggs.jpg", shop_id=shop.id),
         ]
         batches = {product.name: ensure_batch(db, product, batch_date, "300") for product in products}
-        for product, student_price, worker_price in zip(products, ("39000", "62000", "25000", "33000"), ("42000", "68000", "28000", "35000")):
-            ensure_price(db, product, "STUDENT", student_price)
-            ensure_price(db, product, "WORKING", worker_price)
+        for product in products:
+            clear_legacy_prices(db, product)
 
         student_slot = ensure_slot(db, "Điểm giao tập trung KTX Khu A · 11:30 - 12:30", "ALL", "0")
         ensure_slot(db, "Điểm giao tập trung KTX Khu B · 17:00 - 18:30", "ALL", "0")
@@ -363,9 +485,29 @@ def main() -> None:
 
         ensure_request(db, student, "Sữa hạt không đường", "Danh mục: Đồ uống; số lượng: 4 hộp.", "OPEN")
         ensure_request(db, worker, "Mật ong hoa cà phê", "Đã báo giá demo.", "QUOTED", "Có thể cung cấp trong tuần này.", "125000")
-        ensure_notification(db, student, "Đơn hàng đang chờ xác nhận", "Đơn FF-DEMO-PENDING-01 đã được tạo.", "order.status_changed")
-        ensure_notification(db, worker, "Đơn hàng đang chuẩn bị", "Đơn FF-DEMO-PREPARING-01 đang được chuẩn bị.", "order.status_changed")
+        ensure_notification(
+            db,
+            student,
+            "Đơn hàng đang chờ xác nhận",
+            "Đơn FF-DEMO-PENDING-01 đã được tạo.",
+            "order.status_changed",
+            link="/orders/FF-DEMO-PENDING-01",
+        )
+        ensure_notification(
+            db,
+            worker,
+            "Đơn hàng đang chuẩn bị",
+            "Đơn FF-DEMO-PREPARING-01 đang được chuẩn bị.",
+            "order.status_changed",
+            link="/orders/FF-DEMO-PREPARING-01",
+        )
         ensure_moderation_term(db, "spam-demo")
+        ensure_sample_post(db, shop, products)
+        group_customers = [
+            get_user(db, email, name, "CUSTOMER", group, phone, STUDENT_PASSWORD)
+            for email, name, group, phone in GROUP_CUSTOMERS
+        ]
+        ensure_all_groups_post(db, shop, products, [student, worker, *group_customers])
 
         ensure_audit(db, admin, "demo.seeded", "workspace", "local", "Bộ dữ liệu demo FreshFlow")
 

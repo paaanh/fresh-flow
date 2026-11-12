@@ -27,7 +27,26 @@ export function normalizeOrderLines(items: unknown): OrderLine[] {
 
 export default function OrderItems({ lines, money }: { lines?: OrderLine[]; money: (value: number) => string }) {
   if (!lines?.length) return <p className="mt-4 rounded-xl bg-white p-4 text-sm text-slate-500">Đơn hàng này chưa có dữ liệu chi tiết sản phẩm. Các đơn demo cũ chỉ lưu tổng tiền và số lượng; đơn mới sẽ lưu từng mặt hàng.</p>;
-  return <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[480px] text-left text-sm">
+  return <>
+    <div className="mt-4 space-y-2.5 sm:hidden">
+      {lines.map((line, index) => (
+        <div key={`mob-line-${line.productId ?? 'item'}-${index}`} className="flex items-center justify-between gap-3 rounded-xl border border-[#edf2ee] bg-white p-3 text-xs">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <ProductPhoto product={line} className="!h-11 !w-11 shrink-0 rounded-xl" />
+            <div className="min-w-0">
+              <div className="truncate font-bold text-[#1f2d25]">{line.name}</div>
+              <div className="mt-0.5 text-[11px] text-slate-500">
+                {line.quantity} {line.unit} × {line.price == null ? '—' : money(line.price)}
+              </div>
+            </div>
+          </div>
+          <div className="shrink-0 font-extrabold text-[#176b52]">
+            {line.price == null ? '—' : money(line.price * line.quantity)}
+          </div>
+        </div>
+      ))}
+    </div>
+    <div className="mt-4 hidden overflow-x-auto sm:block"><table className="w-full min-w-[480px] text-left text-sm">
     <thead className="border-b bg-white text-xs text-slate-500"><tr><th className="p-3">Sản phẩm</th><th className="p-3 text-right">Số lượng</th><th className="p-3 text-right">Đơn giá</th><th className="p-3 text-right">Thành tiền</th></tr></thead>
     <tbody>{lines.map((line, index) => <tr key={`${line.productId ?? 'item'}-${index}`} className="border-b last:border-0">
       <td className="p-3"><div className="flex items-center gap-3"><ProductPhoto product={line} className="!h-12 !w-12 shrink-0 rounded-xl" /><span className="font-semibold">{line.name}</span></div></td>
@@ -35,5 +54,6 @@ export default function OrderItems({ lines, money }: { lines?: OrderLine[]; mone
       <td className="whitespace-nowrap p-3 text-right">{line.price == null ? '—' : money(line.price)}</td>
       <td className="whitespace-nowrap p-3 text-right font-semibold text-[#176b52]">{line.price == null ? '—' : money(line.price * line.quantity)}</td>
     </tr>)}</tbody>
-  </table></div>;
+  </table></div>
+  </>;
 }

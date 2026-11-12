@@ -1,10 +1,11 @@
 from fastapi import HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.core.audit import write_audit
-from app.models import User
+from app.core.notifications import add_notification
+from app.models import CustomerGroup, User
 from app.schemas import AdminUserUpdateIn, ProfileUpdateIn
 
 
@@ -104,3 +105,40 @@ def update_profile(payload: ProfileUpdateIn, db: Session, user: User) -> User:
         raise HTTPException(409, "Số điện thoại đã được sử dụng bởi tài khoản khác")
     db.refresh(user)
     return user
+
+
+def list_customers_for_operator(search: str | None, db: Session) -> list[User]:
+    query = select(User).where(User.role == "CUSTOMER").order_by(User.created_at.desc())
+    if search:
+        pattern = f"%{search.strip()}%"
+        query = query.where(
+            or_(User.email.ilike(pattern), User.full_name.ilike(pattern), User.phone.ilike(pattern))
+        )
+    return db.scalars(query.limit(200)).all()
+
+
+def assign_customer_group(user_id: int, group_code: str, db: Session, operator: User) -> User:
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "Không tìm thấy khách hàng")
+    if target.role != "CUSTOMER":
+        raise HTTPException(422, "Chỉ có thể gán nhóm khách hàng cho tài khoản người mua")
+
+    clean_code = group_code.strip().upper()
+    grp = db.scalar(select(CustomerGroup).where(func.upper(CustomerGroup.code) == clean_code))
+    if not grp:
+        raise HTTPException(404, f"Không tìm thấy nhóm khách hàng '{clean_code}'")
+
+    target.customer_group = grp.code
+    write_audit(db, operator.id, "customer.group_assigned", "user", str(target.id), f"group={grp.code}")
+    add_notification(
+        db,
+        target.id,
+        f"Bạn đã được thêm vào nhóm {grp.name}",
+        f"{operator.shop_name or operator.full_name} đã cập nhật nhóm khách hàng của bạn sang {grp.name} ({grp.code}).",
+        "customer_group.updated",
+        link="/newfeed",
+    )
+    db.commit()
+    db.refresh(target)
+    return target

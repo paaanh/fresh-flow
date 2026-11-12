@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user, require_admin, require_admin_or_shop
 from app.models import User
-from app.schemas import OrderCreateIn, OrderOut, OrderStatusIn, ShipperAssignIn, OrderPaymentIn
+from app.schemas import OrderCreateIn, OrderOut, OrderStatusIn, ShipperAssignIn, OrderPaymentIn, ShortageResolutionIn
 from app.modules.orders import service
 
 router = APIRouter()
@@ -68,3 +68,20 @@ def update_payment(
 @router.get("/orders/{order_id}/history")
 def order_history(order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return service.order_history_for_user(db, order_id, user)
+
+
+@router.get("/orders/{order_id}/stock-check")
+def stock_check(order_id: int, db: Session = Depends(get_db), operator: User = Depends(require_admin_or_shop)):
+    """Kiểm tra tồn kho khả dụng cho từng mặt hàng của đơn trước khi xác nhận."""
+    return service.stock_check(db, order_id, operator)
+
+
+@router.post("/orders/{order_id}/resolve-shortage", response_model=OrderOut)
+async def resolve_shortage(
+    order_id: int,
+    payload: ShortageResolutionIn,
+    db: Session = Depends(get_db),
+    operator: User = Depends(require_admin_or_shop),
+):
+    """Xử lý đơn thiếu hàng: PARTIAL (giao một phần), WAIT (chờ nhập hàng), OUT_OF_STOCK (báo hết hàng)."""
+    return await service.resolve_shortage(db, order_id, payload, operator)

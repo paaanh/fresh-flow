@@ -81,6 +81,10 @@ class Product(Base):
     images: Mapped[str] = mapped_column(Text, default="")  # JSON array hoặc link ảnh ngăn cách dấu phẩy
     attached_services: Mapped[str] = mapped_column(Text, default="")  # Dịch vụ kèm theo
     base_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    # Chương trình Sale: giá khuyến mãi áp dụng trong khoảng thời gian (None = không giới hạn)
+    sale_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    sale_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sale_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -155,11 +159,52 @@ class Post(Base):
     target_audience: Mapped[str] = mapped_column(String(50), default="ALL")  # ALL, INDIVIDUAL, GROUP, COLLECTIVE
     target_customer_group: Mapped[str | None] = mapped_column(String(50), nullable=True)
     sale_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
-    group_prices: Mapped[str] = mapped_column(Text, default="")  # JSON { "STUDENT": 27000, "GROUP_A": 25000 }
+    group_prices: Mapped[str] = mapped_column(Text, default="")  # (cũ) JSON giá tuyệt đối { "STUDENT": 27000 }
+    # JSON chiết khấu % theo nhóm { "STUDENT": 10, "WORKING": 0 }; giá từng mặt hàng tự tính từ giá chuẩn
+    group_discounts: Mapped[str] = mapped_column(Text, default="")
+    # Bài dành cho nhiều nhóm: JSON ["STUDENT", "GROUP_A"]; trống = theo target_customer_group (bài cũ)
+    target_groups: Mapped[str] = mapped_column(Text, default="")
     order_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     order_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivery_time_text: Mapped[str] = mapped_column(String(100), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class PostItem(Base):
+    """Một mặt hàng trong chương trình bán của bài đăng (giá & hạn mức thuộc về bài, không ghi vào mặt hàng)."""
+    __tablename__ = "post_items"
+    __table_args__ = (UniqueConstraint("post_id", "product_id", name="uq_post_item_product"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    # Số lượng mở bán qua bài (null = không giới hạn, chỉ theo tồn kho) và số đã bán qua bài
+    quantity_limit: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    sold_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
+    # Giá Sale riêng của bài (null = không Sale trong bài)
+    sale_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Giá riêng theo từng nhóm khách hàng trong bài: JSON {"STUDENT": 25000}; nhóm không có = theo % của nhóm
+    group_prices: Mapped[str] = mapped_column(Text, default="")
+    # Giá gốc riêng trong bài (giá gạch ngang + mốc tính %); null = giá chuẩn của mặt hàng
+    list_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+
+
+class PostLike(Base):
+    __tablename__ = "post_likes"
+    __table_args__ = (UniqueConstraint("post_id", "user_id", name="uq_post_like_user"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PostComment(Base):
+    __tablename__ = "post_comments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
@@ -188,6 +233,8 @@ class Order(Base):
     payment_status: Mapped[str] = mapped_column(String(30), default="UNPAID")  # UNPAID, PREPAID, PARTIAL, PAID, DEBT
     payment_method: Mapped[str] = mapped_column(String(30), default="COD")     # COD, BANK_TRANSFER, WALLET
     cash_collected_by_shipper: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    # Trạng thái tồn kho của đơn: NONE (chưa giữ), RESERVED (đã giữ chỗ), SHIPPED (đã xuất kho), RELEASED (đã hoàn trả)
+    inventory_state: Mapped[str] = mapped_column(String(20), default="NONE")
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -205,6 +252,8 @@ class OrderItem(Base):
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3))
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     line_total: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    # Bài đăng mà khách đã mua qua (giá theo chương trình của bài); null = mua từ cửa hàng
+    post_id: Mapped[int | None] = mapped_column(ForeignKey("posts.id"), nullable=True, index=True)
     order: Mapped[Order] = relationship(back_populates="items")
 
 
@@ -267,7 +316,10 @@ class ProductRequest(Base):
     status: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
     admin_response: Mapped[str] = mapped_column(Text, default="")
     quoted_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"), nullable=True)
+    handled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Notification(Base):

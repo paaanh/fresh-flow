@@ -5,7 +5,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowRight, faClock, faPlus, faTrash, faTruck } from '@fortawesome/free-solid-svg-icons';
 import { Badge, Button } from '@/features/customer/pages/shared-ui';
 import ProductPhoto from '@/components/product-photo';
-import InventoryAdjustment, { type AdjustStock } from '@/components/inventory-adjustment';
+import { type AdjustStock } from '@/components/inventory-adjustment';
+import InventoryBoard from '@/components/inventory-board';
 import { api, endpoints, unwrapList, freshflow } from '@/lib/api';
 import type { Order, Product } from '@/types/domain';
 
@@ -14,50 +15,7 @@ export function InventoryView({ products, money, adjust }: {
   money: (value: number) => string;
   adjust: AdjustStock;
 }) {
-  const lowStock = products.filter(product => product.available < 10).length;
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-3">
-        {[
-          ['Mặt hàng đang theo dõi', String(products.length)],
-          ['Sắp hết hàng', String(lowStock)],
-          ['Đơn vị đang chờ duyệt', String(products.reduce((sum, product) => sum + product.ordered, 0))],
-        ].map(([label, value]) => (
-          <div key={label} className="panel p-5">
-            <div className="text-xs text-slate-500">{label}</div>
-            <div className="mt-2 text-2xl font-extrabold text-[#1e2e26]">{value}</div>
-          </div>
-        ))}
-      </div>
-      <div className="panel overflow-hidden">
-        <div className="border-b border-[#f1f5f2] p-4">
-          <h2 className="text-sm font-bold text-[#1f2d25]">Tồn kho theo đợt hàng</h2>
-          <p className="mt-0.5 text-[11px] text-slate-400">Số lượng khả dụng = số lượng ban đầu trừ số lượng đã duyệt.</p>
-        </div>
-        <div className="overflow-auto">
-          <table className="w-full min-w-[760px] text-left text-xs">
-            <thead className="bg-[#f8faf8] text-[10px] uppercase text-slate-400">
-              <tr>{['Mặt hàng', 'Ban đầu', 'Đã duyệt / bán', 'Đang chờ duyệt', 'Khả dụng', 'Giá trị tồn', 'Điều chỉnh'].map(label => <th key={label} className="px-5 py-3">{label}</th>)}</tr>
-            </thead>
-            <tbody>
-              {products.map(product => (
-                <tr key={product.id} className="border-t border-[#f0f4f1]">
-                  <td className="px-5 py-3 font-bold"><ProductPhoto product={product} className="mr-2 inline-block !h-10 !w-10 shrink-0 align-middle" />{product.name}</td>
-                  <td className="px-5">{product.available + product.approved} {product.unit}</td>
-                  <td className="px-5 font-semibold text-[#537b5e]">{product.approved} {product.unit}</td>
-                  <td className="px-5 text-amber-600">{product.ordered} {product.unit}</td>
-                  <td className="px-5 font-extrabold text-[#176b52]">{product.available} {product.unit}</td>
-                  <td className="px-5 text-slate-500">{money(product.available * product.price)}</td>
-                  <td className="px-5 py-3"><InventoryAdjustment id={product.id} name={product.name} unit={product.unit} available={product.available} adjust={adjust} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {products.length === 0 && <p className="p-8 text-center text-xs text-slate-400">Chưa có dữ liệu tồn kho.</p>}
-        </div>
-      </div>
-    </div>
-  );
+  return <InventoryBoard products={products} money={money} adjust={adjust} />;
 }
 
 export function Deliveries({ orders, money, change, statusTone }: {
@@ -432,7 +390,7 @@ export function CustomersView({ notify, apiState }: { notify: (message: string) 
   };
 
   const roleLabel = (r: string) =>
-    r === 'ADMIN' ? 'Quản trị viên' : r === 'SHOP' ? 'Cửa hàng (Shop)' : r === 'SHIPPER' ? 'Tài xế (Shipper)' : 'Khách hàng';
+    r === 'ADMIN' ? 'Admin' : r === 'SHOP' ? 'Shop' : r === 'SHIPPER' ? 'Shipper' : 'Khách hàng';
 
   return (
     <div className="space-y-4">
@@ -442,33 +400,61 @@ export function CustomersView({ notify, apiState }: { notify: (message: string) 
             <b className="text-sm text-[#1e2e26]">Quản lý Tài khoản, Vai trò & Nhóm khách hàng</b>
             <p className="mt-0.5 text-[11px] text-slate-400">Quản lý chi tiết thông tin tài khoản, phân quyền vai trò, nhóm áp dụng giá và trạng thái hoạt động.</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+            <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 scrollbar-hide sm:mx-0 sm:px-0">
             {[
               { id: 'ALL', label: 'Tất cả' },
               { id: 'CUSTOMER', label: 'Khách hàng' },
-              { id: 'SHOP', label: 'Cửa hàng (Shop)' },
+              { id: 'SHOP', label: 'Shop' },
               { id: 'SHIPPER', label: 'Shipper' },
               { id: 'ADMIN', label: 'Admin' },
             ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setRoleFilter(tab.id)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold transition ${
                   roleFilter === tab.id ? 'bg-[#176b52] text-white' : 'bg-[#f4f7f4] text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                {tab.label}
+                {tab.label} <span className="opacity-70">{tab.id === 'ALL' ? customers.length : customers.filter(c => c.role === tab.id).length}</span>
               </button>
             ))}
+            </div>
             <input
+              type="search"
               value={query}
               onChange={event => setQuery(event.target.value)}
               placeholder="Tìm tên, email, SĐT..."
-              className="rounded-xl border border-[#d2ddd5] px-3 py-1.5 text-xs focus:outline-none"
+              className="w-full rounded-xl border border-[#d2ddd5] px-3 py-1.5 text-xs focus:outline-none sm:w-56"
             />
           </div>
         </div>
-        <div className="overflow-auto">
+        <ul className="divide-y divide-[#f0f4f1] md:hidden">
+          {visible.map(customer => (
+            <li key={customer.id} className="space-y-2 p-4 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="break-words font-bold text-[#1e2e26]">{customer.name}</div>
+                  <div className="break-all text-[11px] text-slate-400">{customer.email}{customer.phone ? ` · ${customer.phone}` : ''}</div>
+                </div>
+                <Badge tone={customer.is_active ? 'green' : 'red'}>{customer.status}</Badge>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge tone={customer.role === 'ADMIN' ? 'red' : customer.role === 'SHOP' ? 'green' : customer.role === 'SHIPPER' ? 'blue' : 'gray'}>{roleLabel(customer.role)}</Badge>
+                {customer.role === 'CUSTOMER' && <span className="rounded-full bg-[#eef7f1] px-2 py-0.5 text-[10px] font-bold text-[#176b52]">Nhóm giá: {customer.group}</span>}
+                {customer.role === 'SHOP' && customer.shop_name && <span className="text-[11px] font-semibold text-[#176b52]">{customer.shop_name}</span>}
+                {customer.role === 'SHIPPER' && customer.vehicle_info && <span className="text-[11px] font-semibold text-blue-700">{customer.vehicle_info}</span>}
+                {(customer.is_email_verified || customer.is_phone_verified) && <span className="rounded bg-emerald-50 px-1 text-[10px] font-bold text-emerald-600">✓ Đã xác thực</span>}
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setEditing({ ...customer })} className="rounded-lg border border-[#d2ddd5] px-3 py-1.5 font-bold text-[#176b52]">Chi tiết / Sửa</button>
+                <button onClick={() => void toggle(customer)} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 font-bold text-rose-600">{customer.is_active ? 'Khóa' : 'Mở khóa'}</button>
+              </div>
+            </li>
+          ))}
+          {visible.length === 0 && <li className="p-8 text-center text-xs text-slate-400">Không có tài khoản phù hợp.</li>}
+        </ul>
+        <div className="hidden overflow-auto md:block">
           <table className="w-full min-w-[780px] text-left text-xs">
             <thead className="bg-[#f8faf8] text-[10px] uppercase text-slate-400">
               <tr>{['Tài khoản', 'Vai trò', 'Nhóm khách / Thông tin vai trò', 'Trạng thái', 'Hành động'].map(label => <th key={label} className="px-5 py-3">{label}</th>)}</tr>
@@ -481,18 +467,18 @@ export function CustomersView({ notify, apiState }: { notify: (message: string) 
                     <div className="text-[10px] font-normal text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5">
                       <span>{customer.email}</span>
                       {customer.is_email_verified ? (
-                        <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">Đã xác thực email</span>
+                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">Đã xác thực email</span>
                       ) : (
-                        <span className="text-[9px] text-amber-700 bg-amber-50 px-1 rounded">Chưa xác thực email</span>
+                        <span className="text-[10px] text-amber-700 bg-amber-50 px-1 rounded">Chưa xác thực email</span>
                       )}
                       {customer.phone && (
                         <>
                           <span>·</span>
                           <span>{customer.phone}</span>
                           {customer.is_phone_verified ? (
-                            <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">Đã xác thực SĐT</span>
+                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">Đã xác thực SĐT</span>
                           ) : (
-                            <span className="text-[9px] text-amber-700 bg-amber-50 px-1 rounded">Chưa xác thực SĐT</span>
+                            <span className="text-[10px] text-amber-700 bg-amber-50 px-1 rounded">Chưa xác thực SĐT</span>
                           )}
                         </>
                       )}
@@ -545,8 +531,8 @@ export function CustomersView({ notify, apiState }: { notify: (message: string) 
 
       {/* Modal Chỉnh sửa chi tiết tài khoản */}
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center sm:p-4">
+          <div className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl sm:rounded-2xl sm:p-6">
             <h3 className="text-base font-extrabold text-[#1b2d24]">Chỉnh sửa chi tiết tài khoản</h3>
             <p className="mt-0.5 text-xs text-slate-500">Email: {editing.email} (ID #{editing.id})</p>
 
@@ -774,8 +760,9 @@ export function ModerationView({ notify }: { notify: (msg: string) => void }) {
                   <button
                     type="button"
                     onClick={() => void handleDelete(t.id)}
-                    className="text-rose-400 hover:text-rose-800 font-bold"
+                    className="-my-1 -mr-1.5 flex h-7 w-7 items-center justify-center rounded-md font-bold text-rose-400 hover:bg-rose-100 hover:text-rose-800"
                     title="Xóa từ khóa"
+                    aria-label={`Xóa từ khóa ${t.term}`}
                   >
                     ×
                   </button>
@@ -856,6 +843,38 @@ export function SettingsView() {
   );
 }
 
+export function resolveNotificationLink(
+  item: { event_type?: string; link?: string; title?: string; body?: string },
+  role: 'ADMIN' | 'SHOP' | 'SHIPPER' | 'CUSTOMER' = 'CUSTOMER'
+) {
+  const rawLink = (item.link || '').trim();
+  const orderMatch = `${rawLink} ${item.title || ''} ${item.body || ''}`.match(/\b(FF-[A-Za-z0-9-]+)\b/);
+  const extractedCode = orderMatch?.[1];
+
+  if (rawLink) {
+    if (role === 'ADMIN' && rawLink.startsWith('/orders/')) {
+      return `/admin${rawLink}`;
+    }
+    if (role !== 'ADMIN' && rawLink.startsWith('/admin/orders/')) {
+      return rawLink.replace(/^\/admin/, '');
+    }
+    if ((rawLink === '/orders' || rawLink === '/shop/orders' || rawLink === '/admin/orders') && extractedCode) {
+      return role === 'ADMIN' ? `/admin/orders/${extractedCode}` : `/orders/${extractedCode}`;
+    }
+    return rawLink;
+  }
+
+  if (extractedCode || item.event_type?.startsWith('order.')) {
+    if (extractedCode) {
+      return role === 'ADMIN' ? `/admin/orders/${extractedCode}` : `/orders/${extractedCode}`;
+    }
+    return role === 'SHIPPER' ? '/shipper' : role === 'SHOP' ? '/shop/orders' : role === 'ADMIN' ? '/admin/orders' : '/orders';
+  }
+  if (item.event_type?.startsWith('product_request.')) return '/requests';
+  if (item.event_type?.startsWith('chat.')) return '/chat';
+  return '/newfeed';
+}
+
 export function AdminNotificationsView({
   notifications,
   notify,
@@ -882,13 +901,8 @@ export function AdminNotificationsView({
   const [successMsg, setSuccessMsg] = useState('');
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
-  const resolveNotificationLink = (item: { event_type: string; link?: string }) => {
-    if (item.link) return item.link;
-    if (item.event_type?.startsWith('order.')) return senderRole === 'SHOP' ? '/shop/orders' : '/orders';
-    if (item.event_type?.startsWith('product_request.')) return '/requests';
-    if (item.event_type?.startsWith('chat.')) return '/chat';
-    return '/newfeed';
-  };
+  const getNotificationHref = (item: { event_type: string; link?: string; title?: string; body?: string }) =>
+    resolveNotificationLink(item, senderRole);
 
   const handleBroadcast = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -951,8 +965,8 @@ export function AdminNotificationsView({
           </button>
         </div>
 
-        {activeTab === 'inbox' && notifications.length > 0 && (
-          <button onClick={() => void clearAll()} className="text-xs font-bold text-[#176b52] hover:underline">
+        {activeTab === 'inbox' && notifications.some(n => !n.is_read) && (
+          <button onClick={() => void clearAll()} className="rounded-lg px-2 py-2 text-xs font-bold text-[#176b52] hover:bg-emerald-50">
             Đánh dấu tất cả đã đọc
           </button>
         )}
@@ -985,8 +999,8 @@ export function AdminNotificationsView({
                 {[
                   { id: 'ALL', label: 'Tất cả người dùng' },
                   { id: 'CUSTOMER', label: 'Chỉ Khách hàng' },
-                  { id: 'SHOP', label: 'Chỉ Cửa hàng (Shop)' },
-                  { id: 'SHIPPER', label: 'Chỉ Tài xế (Shipper)' },
+                  { id: 'SHOP', label: 'Chỉ Shop' },
+                  { id: 'SHIPPER', label: 'Chỉ Shipper' },
                 ].map(opt => (
                   <label
                     key={opt.id}
@@ -1071,7 +1085,8 @@ export function AdminNotificationsView({
           )}
 
           {notifications.map(item => {
-            const targetHref = resolveNotificationLink(item);
+            const targetHref = getNotificationHref(item);
+            const isOrderTarget = targetHref.includes('/orders/');
             return (
               <article
                 key={item.id}
@@ -1088,12 +1103,12 @@ export function AdminNotificationsView({
                   <div className="flex flex-wrap items-center gap-2">
                     <h4 className="text-sm font-bold text-[#1f2d25]">{item.title}</h4>
                     {item.event_type === 'system.broadcast' && (
-                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800">
+                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
                         Toàn sàn
                       </span>
                     )}
-                    <span className="ml-auto text-[11px] font-semibold text-[#176b52] hover:underline">
-                      Xem chi tiết →
+                    <span className="ml-auto inline-flex items-center gap-1 rounded-lg bg-[#eef7f1] px-2.5 py-1 text-[11px] font-bold text-[#176b52]">
+                      {isOrderTarget ? 'Xem đơn hàng →' : 'Xem chi tiết →'}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-slate-600">{item.body}</p>
@@ -1108,7 +1123,7 @@ export function AdminNotificationsView({
                       e.stopPropagation();
                       void markRead(item.id);
                     }}
-                    className="text-xs font-semibold text-[#176b52] hover:underline shrink-0"
+                    className="shrink-0 rounded-lg px-2 py-2 text-xs font-semibold text-[#176b52] hover:bg-emerald-50"
                   >
                     Đã đọc
                   </button>

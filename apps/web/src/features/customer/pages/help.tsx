@@ -89,7 +89,7 @@ export function Help({ onOpenChat }: { onOpenChat?: () => void }) {
               <h2 className="font-extrabold text-sm text-[#1e2d25]">{guide.title}</h2>
               <p className="mt-2 text-xs leading-relaxed text-slate-500">{guide.description}</p>
             </div>
-            <Link href={guide.href} className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-[#176b52] hover:underline">
+            <Link href={guide.href} className="-ml-2 mt-3 inline-flex items-center gap-2 rounded-lg px-2 py-2 text-xs font-bold text-[#176b52] hover:bg-emerald-50">
               Xem hướng dẫn chi tiết <FontAwesomeIcon icon={faArrowRight} />
             </Link>
           </section>
@@ -112,7 +112,7 @@ export function Help({ onOpenChat }: { onOpenChat?: () => void }) {
               </div>
             </div>
           </div>
-          <Link href="/profile" className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-[#176b52] hover:underline">
+          <Link href="/profile" className="-ml-2 mt-3 inline-flex items-center gap-2 rounded-lg px-2 py-2 text-xs font-bold text-[#176b52] hover:bg-emerald-50">
             Mở hồ sơ & sổ địa chỉ <FontAwesomeIcon icon={faArrowRight} />
           </Link>
         </section>

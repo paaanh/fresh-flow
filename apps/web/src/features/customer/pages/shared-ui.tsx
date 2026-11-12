@@ -14,12 +14,13 @@ export function Badge({ children, tone = 'gray' }: { children: React.ReactNode; 
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${styles[tone] || styles.gray}`}>{children}</span>;
 }
 
-export function Button({ children, onClick, kind = 'primary', className = '', disabled = false }: {
+export function Button({ children, onClick, kind = 'primary', className = '', disabled = false, 'aria-label': ariaLabel }: {
   children: React.ReactNode;
   onClick?: () => void;
   kind?: 'primary' | 'secondary' | 'quiet' | 'danger';
   className?: string;
   disabled?: boolean;
+  'aria-label'?: string;
 }) {
   const styles = {
     primary: 'bg-[#176b52] text-white hover:bg-[#10563f]',
@@ -28,5 +29,5 @@ export function Button({ children, onClick, kind = 'primary', className = '', di
     danger: 'border border-rose-200 text-rose-600 hover:bg-white',
   };
 
-  return <button disabled={disabled} onClick={onClick} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed ${styles[kind]} ${className}`}>{children}</button>;
+  return <button aria-label={ariaLabel} disabled={disabled} onClick={onClick} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed ${styles[kind]} ${className}`}>{children}</button>;
 }

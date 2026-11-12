@@ -47,6 +47,11 @@ class ProfileUpdateIn(BaseModel):
     shop_description: str | None = Field(default=None, max_length=5000)
     shop_address: str | None = Field(default=None, max_length=255)
     vehicle_info: str | None = Field(default=None, max_length=100)
+    avatar_url: str | None = Field(default=None, max_length=500)
+
+
+class CustomerGroupAssignIn(BaseModel):
+    customer_group: str = Field(min_length=2, max_length=50)
 
 
 class AdminUserUpdateIn(BaseModel):
@@ -59,6 +64,11 @@ class AdminUserUpdateIn(BaseModel):
     shop_description: str | None = Field(default=None, max_length=5000)
     shop_address: str | None = Field(default=None, max_length=255)
     vehicle_info: str | None = Field(default=None, max_length=100)
+    avatar_url: str | None = Field(default=None, max_length=500)
+
+
+class CustomerGroupAssignIn(BaseModel):
+    customer_group: str = Field(min_length=2, max_length=50)
 
 
 class TokenOut(BaseModel):
@@ -117,6 +127,36 @@ class CategoryIn(BaseModel):
     icon: str = ""
 
 
+class CategoryUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    parent_id: int | None = None
+    # parent_id gửi null có nghĩa là đưa lên cấp cao nhất; không gửi = giữ nguyên
+    description: str | None = None
+
+
+class BulkProductIn(BaseModel):
+    name: str = Field(min_length=1, max_length=180)
+    category_id: int | None = None
+    unit: str = Field(default="kg", max_length=30)
+    base_price: Decimal = Field(gt=0, decimal_places=2)
+    initial_stock: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=3)
+    description: str = ""
+    image_url: str | None = Field(default=None, max_length=500)
+
+
+class BulkProductsIn(BaseModel):
+    items: list[BulkProductIn] = Field(min_length=1, max_length=200)
+
+
+class BulkReceiveItemIn(BaseModel):
+    product_id: int
+    quantity: Decimal = Field(gt=0, decimal_places=3)
+
+
+class BulkReceiveIn(BaseModel):
+    items: list[BulkReceiveItemIn] = Field(min_length=1, max_length=300)
+
+
 class CategoryOut(ORMModel):
     id: int
     name: str
@@ -141,6 +181,9 @@ class ProductIn(BaseModel):
     attached_services: str = ""
     base_price: Decimal = Field(ge=0, decimal_places=2)
     shop_id: int | None = None
+    sale_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    sale_start_at: datetime | None = None
+    sale_end_at: datetime | None = None
 
 
 class ProductUpdateIn(BaseModel):
@@ -153,6 +196,10 @@ class ProductUpdateIn(BaseModel):
     attached_services: str | None = None
     base_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
     is_active: bool | None = None
+    # Gửi null để kết thúc chương trình Sale
+    sale_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    sale_start_at: datetime | None = None
+    sale_end_at: datetime | None = None
 
 
 class CatalogBatchOut(BaseModel):
@@ -173,10 +220,17 @@ class ProductOut(BaseModel):
     attached_services: str = ""
     base_price: Decimal
     customer_price: Decimal | None = None
+    list_price: Decimal | None = None
+    sale_price: Decimal | None = None
+    sale_start_at: datetime | None = None
+    sale_end_at: datetime | None = None
+    sale_status: str = "NONE"
     is_active: bool
     shop_id: int | None = None
     shop_name: str | None = None
     available_quantity: Decimal = Decimal("0")
+    stock_quantity: Decimal = Decimal("0")
+    reserved_quantity: Decimal = Decimal("0")
     batches: list[CatalogBatchOut] = Field(default_factory=list)
 
     @field_validator("description", "images", "attached_services", mode="before")
@@ -219,6 +273,8 @@ class DeliverySlotIn(BaseModel):
 class OrderLineIn(BaseModel):
     batch_id: int
     quantity: Decimal = Field(gt=0, decimal_places=3)
+    # Mua qua bài đăng: tính theo giá chương trình của bài và trừ hạn mức mở bán
+    post_id: int | None = None
 
 
 class OrderCreateIn(BaseModel):
@@ -258,6 +314,7 @@ class OrderItemOut(ORMModel):
     quantity: Decimal
     unit_price: Decimal
     line_total: Decimal
+    post_id: int | None = None
 
 
 class OrderOut(BaseModel):
@@ -265,12 +322,16 @@ class OrderOut(BaseModel):
     order_number: str
     user_id: int
     customer_name: str | None = None
+    customer_avatar_url: str | None = None
+    customer_group: str | None = None
+    customer_is_verified: bool = False
     shop_id: int | None = None
     shop_name: str | None = None
     shipper_id: int | None = None
     shipper_name: str | None = None
     shipper_phone: str | None = None
     shipper_vehicle: str | None = None
+    shipper_avatar_url: str | None = None
     status: str
     delivery_type: str
     delivery_address: str
@@ -288,6 +349,7 @@ class OrderOut(BaseModel):
     payment_status: str = "UNPAID"
     payment_method: str = "COD"
     cash_collected_by_shipper: Decimal = Decimal("0")
+    inventory_state: str = "NONE"
     note: str
     created_at: datetime
     items: list[OrderItemOut]
@@ -313,6 +375,18 @@ class ProductRequestResponseIn(BaseModel):
     status: str = Field(pattern="^(QUOTED|ACCEPTED|REJECTED|FULFILLED)$")
     admin_response: str = Field(default="", max_length=2000)
     quoted_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    # Khi hoàn tất: liên kết mặt hàng có sẵn, hoặc nhập kho số lượng để tạo mặt hàng mới lên kệ
+    product_id: int | None = None
+    stock_quantity: Decimal | None = Field(default=None, gt=0, decimal_places=3)
+    unit: str | None = Field(default=None, max_length=30)
+    category_id: int | None = None
+    # Ảnh của mặt hàng mới (đường dẫn trả về từ /admin/products/images)
+    image_url: str | None = Field(default=None, max_length=500)
+
+
+class ShortageResolutionIn(BaseModel):
+    action: str = Field(pattern="^(PARTIAL|WAIT|OUT_OF_STOCK)$")
+    note: str = Field(default="", max_length=1000)
 
 
 class NotificationOut(ORMModel):
@@ -353,9 +427,29 @@ class VatConfigOut(ORMModel):
     updated_at: datetime
 
 
+class PostItemIn(BaseModel):
+    """Một mặt hàng trong chương trình của bài: hạn mức mở bán và giá Sale riêng của bài."""
+    product_id: int
+    quantity_limit: Decimal | None = Field(default=None, gt=0, decimal_places=3)
+    sale_price: Decimal | None = Field(default=None, gt=0, decimal_places=2)
+    # Giá riêng của mặt hàng cho từng nhóm khách hàng trong bài {"STUDENT": 25000}
+    group_prices: dict[str, Decimal] = Field(default_factory=dict)
+    # Giá gốc riêng trong bài (null = giá chuẩn của mặt hàng)
+    list_price: Decimal | None = Field(default=None, gt=0, decimal_places=2)
+
+    @field_validator("group_prices")
+    @classmethod
+    def _positive_prices(cls, value: dict[str, Decimal]) -> dict[str, Decimal]:
+        for code, price in value.items():
+            if price is None or price <= 0:
+                raise ValueError(f"Giá cho nhóm {code} phải lớn hơn 0")
+        return value
+
+
 class PostIn(BaseModel):
     title: str = Field(min_length=2, max_length=200)
-    content: str = ""
+    # Mô tả soạn bằng trình soạn thảo (HTML đã giới hạn thẻ)
+    content: str = Field(default="", max_length=30000)
     post_type: str = "PRODUCT_INTRO"  # PRODUCT_INTRO, DAILY_SPECIAL, PROMOTION
     product_id: int | None = None
     product_ids: list[int] = Field(default_factory=list)
@@ -364,17 +458,32 @@ class PostIn(BaseModel):
     quantity_limit: Decimal | None = None
     target_audience: str = "ALL"  # ALL, INDIVIDUAL, GROUP, COLLECTIVE
     target_customer_group: str | None = None
+    # Bài dành cho nhiều nhóm (target_audience = "GROUP")
+    target_groups: list[str] = Field(default_factory=list)
     sale_price: Decimal | None = None
     group_prices: str = ""
     order_start_at: datetime | None = None
     order_end_at: datetime | None = None
     delivery_time_text: str = ""
+    # Mặt hàng của chương trình (giá & hạn mức thuộc về bài). Trống = dùng product_ids, không hạn mức/Sale.
+    items: list[PostItemIn] = Field(default_factory=list)
+    # Chiết khấu % theo nhóm khách hàng (0–90). Bài 1 nhóm chỉ dùng nhóm đó; bài tất cả nhóm dùng mọi nhóm.
+    group_discounts: dict[str, Decimal] = Field(default_factory=dict)
+
+    @field_validator("group_discounts")
+    @classmethod
+    def _discount_range(cls, value: dict[str, Decimal]) -> dict[str, Decimal]:
+        for code, pct in value.items():
+            if pct < 0 or pct > 90:
+                raise ValueError(f"Chiết khấu nhóm {code} phải từ 0% đến 90%")
+        return value
 
 
 class PostOut(BaseModel):
     id: int
     author_id: int
     author_name: str | None = None
+    author_avatar_url: str | None = None
     shop_name: str | None = None
     title: str
     content: str = ""
@@ -387,20 +496,33 @@ class PostOut(BaseModel):
     quantity_limit: Decimal | None = None
     target_audience: str
     target_customer_group: str | None = None
+    target_groups: list[str] = Field(default_factory=list)
     original_price: Decimal | None = None
     sale_price: Decimal | None = None
     effective_price: Decimal | None = None
     group_prices: str = ""
+    group_discounts: dict[str, float] = Field(default_factory=dict)
     order_start_at: datetime | None = None
     order_end_at: datetime | None = None
     delivery_time_text: str = ""
     is_active: bool
     created_at: datetime
+    program_status: str = "ACTIVE"  # UPCOMING / ACTIVE / ENDED
+    like_count: int = 0
+    liked_by_me: bool = False
+    comment_count: int = 0
+    # 2 bình luận mới nhất (theo thứ tự thời gian) để hiện ngay dưới bài
+    recent_comments: list[dict] = Field(default_factory=list)
+
 
     @field_validator("content", "image_urls", "group_prices", "delivery_time_text", mode="before")
     @classmethod
     def normalize_post_str(cls, v):
         return "" if v is None else v
+
+
+class PostCommentIn(BaseModel):
+    content: str = Field(min_length=1, max_length=1000)
 
 
 class ProductReviewIn(BaseModel):

@@ -1,7 +1,7 @@
 from decimal import Decimal
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, update
 
 from app.api.deps import get_db, require_shipper
 from app.models import Order, User, OrderStatusHistory
@@ -48,14 +48,25 @@ async def claim_order(
     if not order:
         raise HTTPException(404, "Không tìm thấy đơn hàng")
     if order.status not in {"CONFIRMED", "PREPARING", "READY_FOR_PICKUP"}:
-        raise HTTPException(400, "Đơn hàng không ở trạng thái sẵn sàng để nhận")
-    if order.delivery_type not in {"HOME", "DELIVERY"}:
-        raise HTTPException(400, "Đơn hàng tự lấy hàng (PICKUP) không cần Shipper giao")
+        raise HTTPException(409, "Đơn hàng không còn ở trạng thái chờ Shipper nhận")
     if order.shipper_id and order.shipper_id != shipper.id:
         raise HTTPException(409, "Đơn hàng đã có Shipper khác phụ trách")
+    if order.inventory_state not in {"RESERVED", "SHIPPED"}:
+        raise HTTPException(409, "Đơn hàng chưa được giữ hàng trong kho, vui lòng chờ Shop/Admin xác nhận")
+
+    # Compare-and-set: two shippers claiming at the same time cannot both win
+    claimed = db.execute(
+        update(Order)
+        .where(Order.id == order.id, or_(Order.shipper_id.is_(None), Order.shipper_id == shipper.id))
+        .values(shipper_id=shipper.id)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "Đơn hàng vừa được Shipper khác nhận")
+    db.refresh(order)
 
     old_status = order.status
-    order.shipper_id = shipper.id
     if order.status in {"CONFIRMED", "PREPARING"}:
         order.status = "READY_FOR_PICKUP"
     if order.shop_id:
@@ -140,21 +151,33 @@ async def mark_completed(
     db: Session = Depends(get_db),
     shipper: User = Depends(require_shipper),
 ):
-    """Shipper marks order completed and updates COD money collected."""
+    """Shipper marks order completed and records the COD cash collected at the door.
+
+    `paid_amount` is the cash collected now; it is added to what the customer had
+    already paid before delivery instead of overwriting it.
+    """
+    if paid_amount is not None and paid_amount < 0:
+        raise HTTPException(422, "Số tiền thu không hợp lệ")
+    before = order_repo.get_order(db, order_id)
+    if not before:
+        raise HTTPException(404, "Không tìm thấy đơn hàng")
+    prev_paid = before.paid_amount or Decimal("0")
+    prev_cash = before.cash_collected_by_shipper or Decimal("0")
     order = await order_service.change_order_status(
         db, order_id, OrderStatusIn(status="COMPLETED", note=note), shipper
     )
     if paid_amount is not None and order.payment_method == "COD":
-        if paid_amount >= order.total:
+        total_paid = prev_paid + paid_amount
+        if total_paid >= order.total:
             p_status = "PAID"
-        elif paid_amount > Decimal("0"):
+        elif total_paid > Decimal("0"):
             p_status = "PARTIAL"
         else:
             p_status = "UNPAID"
         payment_in = OrderPaymentIn(
-            paid_amount=paid_amount,
+            paid_amount=min(total_paid, order.total) if p_status == "PAID" else total_paid,
             payment_status=p_status,
-            cash_collected=paid_amount,
+            cash_collected=prev_cash + paid_amount,
             note="Shipper thu tiền khi giao thành công",
         )
         order = order_service.update_order_payment(db, order.id, payment_in, shipper)

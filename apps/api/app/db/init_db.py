@@ -56,6 +56,21 @@ def init_database():
             conn.execute(text("ALTER TABLE products ADD COLUMN images TEXT DEFAULT ''"))
         if "attached_services" not in prod_cols:
             conn.execute(text("ALTER TABLE products ADD COLUMN attached_services TEXT DEFAULT ''"))
+        if "sale_price" not in prod_cols:
+            conn.execute(text("ALTER TABLE products ADD COLUMN sale_price NUMERIC(12, 2)"))
+        if "sale_start_at" not in prod_cols:
+            conn.execute(text("ALTER TABLE products ADD COLUMN sale_start_at DATETIME"))
+        if "sale_end_at" not in prod_cols:
+            conn.execute(text("ALTER TABLE products ADD COLUMN sale_end_at DATETIME"))
+
+        # Product requests columns
+        req_cols = {col["name"] for col in inspector.get_columns("product_requests")}
+        if "product_id" not in req_cols:
+            conn.execute(text("ALTER TABLE product_requests ADD COLUMN product_id INTEGER"))
+        if "handled_by" not in req_cols:
+            conn.execute(text("ALTER TABLE product_requests ADD COLUMN handled_by INTEGER"))
+        if "updated_at" not in req_cols:
+            conn.execute(text("ALTER TABLE product_requests ADD COLUMN updated_at DATETIME"))
 
         # Orders columns
         order_cols = {col["name"] for col in inspector.get_columns("orders")}
@@ -85,26 +100,113 @@ def init_database():
             conn.execute(text("ALTER TABLE orders ADD COLUMN payment_method VARCHAR(30) DEFAULT 'COD'"))
         if "cash_collected_by_shipper" not in order_cols:
             conn.execute(text("ALTER TABLE orders ADD COLUMN cash_collected_by_shipper NUMERIC(12, 2) DEFAULT 0"))
+        if "inventory_state" not in order_cols:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN inventory_state VARCHAR(20) DEFAULT 'NONE'"))
+            backfill_order_inventory_state(conn)
 
         # Posts columns
         post_cols = {col["name"] for col in inspector.get_columns("posts")}
         if "product_ids" not in post_cols:
             conn.execute(text("ALTER TABLE posts ADD COLUMN product_ids VARCHAR(512) DEFAULT ''"))
+        if "group_discounts" not in post_cols:
+            # No DEFAULT on TEXT: MySQL rejects it (error 1101)
+            conn.execute(text("ALTER TABLE posts ADD COLUMN group_discounts TEXT"))
+            conn.execute(text("UPDATE posts SET group_discounts = '' WHERE group_discounts IS NULL"))
+        if "target_groups" not in post_cols:
+            conn.execute(text("ALTER TABLE posts ADD COLUMN target_groups TEXT"))
+            conn.execute(text("UPDATE posts SET target_groups = '' WHERE target_groups IS NULL"))
+        post_item_cols = {col["name"] for col in inspector.get_columns("post_items")}
+        if "group_prices" not in post_item_cols:
+            conn.execute(text("ALTER TABLE post_items ADD COLUMN group_prices TEXT"))
+            conn.execute(text("UPDATE post_items SET group_prices = '' WHERE group_prices IS NULL"))
+        if "list_price" not in post_item_cols:
+            conn.execute(text("ALTER TABLE post_items ADD COLUMN list_price NUMERIC(12, 2)"))
 
         # Notifications columns
         notif_cols = {col["name"] for col in inspector.get_columns("notifications")}
         if "link" not in notif_cols:
             conn.execute(text("ALTER TABLE notifications ADD COLUMN link VARCHAR(255) DEFAULT ''"))
 
+        # Order lines bought through a Newfeed post (giá theo bài)
+        item_cols = {col["name"] for col in inspector.get_columns("order_items")}
+        if "post_id" not in item_cols:
+            conn.execute(text("ALTER TABLE order_items ADD COLUMN post_id INTEGER"))
+        backfill_post_items(conn)
+
         if not inspector.has_table("alembic_version"):
             conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"))
-            conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0004_full_upgrade')"))
+            conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0009_post_item_list_price')"))
 
         conn.commit()
 
     # 3. Seed foundational data if empty or missing
     with SessionLocal() as db:
         seed_core_configuration(db)
+
+
+def backfill_post_items(conn) -> None:
+    """Posts created before per-post programs only had a product_ids JSON list: give each of
+    them post_items rows (no quantity limit, no post Sale) so they can be bought through."""
+    import json as _json
+
+    have_items = {row[0] for row in conn.execute(text("SELECT DISTINCT post_id FROM post_items")).all()}
+    products = {row[0] for row in conn.execute(text("SELECT id FROM products")).all()}
+    post_cols = {c["name"] for c in inspect(conn).get_columns("posts")}
+    # product_ids / quantity_limit may be missing on databases built only from migrations
+    ids_col = "product_ids" if "product_ids" in post_cols else "NULL"
+    limit_col = "quantity_limit" if "quantity_limit" in post_cols else "NULL"
+    posts = conn.execute(text(f"SELECT id, product_id, {ids_col}, {limit_col} FROM posts")).all()
+    for post_id, primary, raw_ids, limit in posts:
+        if post_id in have_items:
+            continue
+        ids: list[int] = []
+        if primary:
+            ids.append(int(primary))
+        try:
+            for x in _json.loads(raw_ids or "[]"):
+                if int(x) not in ids:
+                    ids.append(int(x))
+        except Exception:
+            pass
+        ids = [pid for pid in ids if pid in products]
+        for position, pid in enumerate(ids):
+            conn.execute(
+                text("INSERT INTO post_items (post_id, product_id, position, quantity_limit, sold_quantity, sale_price) "
+                     "VALUES (:post, :product, :pos, :limit, 0, NULL)"),
+                {"post": post_id, "product": pid, "pos": position, "limit": limit if len(ids) == 1 else None},
+            )
+    logger.info("Backfilled post_items for %s legacy posts", len([p for p in posts if p[0] not in have_items]))
+
+
+def backfill_order_inventory_state(conn) -> None:
+    """One-time migration of legacy orders to the reserved/shipped inventory model.
+
+    Before inventory_state existed, every confirmed order stayed counted in
+    inventory_batches.approved_quantity forever. Orders still waiting in the warehouse
+    become RESERVED; orders that already left the warehouse become SHIPPED and their
+    quantity is removed from both the reserved and the physical stock counters.
+    """
+    conn.execute(text(
+        "UPDATE orders SET inventory_state = 'RESERVED' WHERE status IN ('CONFIRMED','PREPARING','READY_FOR_PICKUP')"
+    ))
+    rows = conn.execute(text(
+        "SELECT oi.batch_id, SUM(oi.quantity) FROM order_items oi JOIN orders o ON o.id = oi.order_id "
+        "WHERE o.status IN ('PICKED_UP','DELIVERING','COMPLETED') GROUP BY oi.batch_id"
+    )).all()
+    for batch_id, qty in rows:
+        conn.execute(
+            text(
+                "UPDATE inventory_batches SET "
+                "initial_quantity = CASE WHEN initial_quantity >= :q THEN initial_quantity - :q ELSE 0 END, "
+                "approved_quantity = CASE WHEN approved_quantity >= :q THEN approved_quantity - :q ELSE 0 END "
+                "WHERE id = :id"
+            ),
+            {"q": qty, "id": batch_id},
+        )
+    conn.execute(text(
+        "UPDATE orders SET inventory_state = 'SHIPPED' WHERE status IN ('PICKED_UP','DELIVERING','COMPLETED')"
+    ))
+    logger.info("Backfilled orders.inventory_state for %s shipped batches", len(rows))
 
 
 def seed_core_configuration(db: Session):

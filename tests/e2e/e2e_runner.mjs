@@ -203,7 +203,7 @@ async function runE2E() {
   // 11. Admin verifies reports
   console.log('11. [Admin] Kiểm tra báo cáo tài chính & đối soát đơn hàng...');
   const summary = await req('/admin/reports/dashboard?days=30', { headers: adminHeaders });
-  console.log(`    -> Báo cáo Dashboard: Tổng ${summary.total_orders} đơn hàng, Doanh thu: ${summary.revenue}đ, Tỷ lệ giao thành công: ${summary.delivery_success_rate}%.\n`);
+  console.log(`    -> Báo cáo Dashboard: Tổng ${summary.total_orders} đơn hàng, Doanh thu: ${Number(summary.total_revenue).toLocaleString("vi-VN")}đ, Tỷ lệ giao thành công: ${summary.delivery_success_rate}%.\n`);
 
   console.log('====================================================');
   console.log('🎉 TẤT CẢ KỊCH BẢN E2E ĐÃ HOÀN TẤT THÀNH CÔNG 100%!');

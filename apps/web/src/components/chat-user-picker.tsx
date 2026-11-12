@@ -13,6 +13,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import type { ChatUser, UserRole } from '@/types/domain';
 import { freshflow } from '@/lib/api';
+import UserAvatar from '@/components/user-avatar';
 
 interface ChatUserPickerProps {
   isOpen: boolean;
@@ -64,11 +65,11 @@ export default function ChatUserPicker({
   const roleLabel = (role: UserRole) => {
     switch (role) {
       case 'ADMIN':
-        return { label: 'Quản trị viên', bg: 'bg-rose-50 text-rose-700 border-rose-200' };
+        return { label: 'Admin', bg: 'bg-rose-50 text-rose-700 border-rose-200' };
       case 'SHOP':
-        return { label: 'Cửa hàng (Shop)', bg: 'bg-emerald-50 text-[#176b52] border-emerald-200' };
+        return { label: 'Shop', bg: 'bg-emerald-50 text-[#176b52] border-emerald-200' };
       case 'SHIPPER':
-        return { label: 'Tài xế Shipper', bg: 'bg-blue-50 text-blue-700 border-blue-200' };
+        return { label: 'Shipper', bg: 'bg-blue-50 text-blue-700 border-blue-200' };
       case 'CUSTOMER':
       default:
         return { label: 'Khách hàng', bg: 'bg-slate-50 text-slate-700 border-slate-200' };
@@ -133,9 +134,9 @@ export default function ChatUserPicker({
             {[
               { id: 'ALL', label: 'Tất cả' },
               { id: 'CUSTOMER', label: 'Khách hàng' },
-              { id: 'SHOP', label: 'Cửa hàng (Shop)' },
+              { id: 'SHOP', label: 'Shop' },
               { id: 'SHIPPER', label: 'Shipper' },
-              { id: 'ADMIN', label: 'Quản trị viên' },
+              { id: 'ADMIN', label: 'Admin' },
             ].map(r => (
               <button
                 key={r.id}
@@ -182,9 +183,13 @@ export default function ChatUserPicker({
                   className="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left transition hover:bg-[#f6f9f6]"
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#e3f0e8] text-[#176b52]">
-                      <FontAwesomeIcon icon={icon} />
-                    </div>
+                    {u.avatar_url ? (
+                      <UserAvatar name={displayName} avatarUrl={u.avatar_url} size="md" verified />
+                    ) : (
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#e3f0e8] text-[#176b52]">
+                        <FontAwesomeIcon icon={icon} />
+                      </div>
+                    )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-xs font-bold text-[#1f2d25]">{displayName}</span>

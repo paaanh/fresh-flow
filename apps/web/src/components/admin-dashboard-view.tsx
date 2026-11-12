@@ -160,7 +160,7 @@ export default function AdminDashboardView({
       {/* Charts Section */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Doanh thu theo thời gian */}
-        <div className="rounded-2xl border border-[#e8ede8] bg-white p-6 shadow-sm lg:col-span-2">
+        <div className="min-w-0 rounded-2xl border border-[#e8ede8] bg-white p-4 shadow-sm sm:p-6 lg:col-span-2">
           <div className="flex items-center justify-between border-b border-[#f1f5f2] pb-4">
             <div>
               <h3 className="text-sm font-bold text-[#1f2f27]">Doanh thu theo thời gian</h3>
@@ -171,12 +171,12 @@ export default function AdminDashboardView({
             </span>
           </div>
 
-          <div className="mt-6 flex h-52 items-end gap-2.5 pt-8 sm:gap-3">
+          <div className="mt-6 flex h-52 items-end gap-1 pt-8 sm:gap-3">
             {summary.orders_by_date.map((item, idx) => {
               const hasRevenue = item.revenue > 0;
               const heightPercent = hasRevenue ? Math.max(10, Math.round((item.revenue / maxRevenue) * 100)) : 4;
               return (
-                <div key={idx} className="group relative flex h-full flex-1 flex-col items-center justify-end gap-2">
+                <div key={idx} className="group relative flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2">
                   <div className="pointer-events-none absolute -top-2 z-10 hidden whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] font-bold text-white shadow-md group-hover:block">
                     {money(item.revenue)} · {item.orders} đơn
                   </div>
@@ -190,7 +190,7 @@ export default function AdminDashboardView({
                       }`}
                     />
                   </div>
-                  <span className="text-[10px] font-medium text-[#85948b]">{item.date}</span>
+                  <span className={`max-w-full truncate text-[10px] font-medium text-[#85948b] ${idx % 3 !== 0 && idx !== summary.orders_by_date.length - 1 ? "invisible sm:visible" : ""}`}>{item.date}</span>
                 </div>
               );
             })}
@@ -198,7 +198,7 @@ export default function AdminDashboardView({
         </div>
 
         {/* Trạng thái đơn hàng */}
-        <div className="rounded-2xl border border-[#e8ede8] bg-white p-6 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-[#e8ede8] bg-white p-4 shadow-sm sm:p-6">
           <h3 className="text-sm font-bold text-[#1f2f27]">Trạng thái đơn hàng</h3>
           <p className="text-[11px] text-[#86968d]">Tỷ lệ xử lý các đơn hiện tại</p>
 
@@ -267,7 +267,7 @@ export default function AdminDashboardView({
                 {recentOrders.slice(0, 6).map(order => (
                   <tr key={order.apiId ?? order.id} className="hover:bg-slate-50">
                     <td className="px-5 py-3">
-                      <Link href={`/admin/orders/${encodeURIComponent(order.id)}`} className="font-bold text-[#176b52] hover:underline">
+                      <Link href={`/admin/orders/${encodeURIComponent(order.id)}`} className="inline-block py-1.5 font-bold text-[#176b52] hover:underline">
                         #{order.id}
                       </Link>
                       <div className="mt-1 text-[10px] text-[#86968d]">{order.customer_name || order.customer || 'Khách hàng'}</div>
@@ -283,7 +283,7 @@ export default function AdminDashboardView({
         </section>
       </div>
 
-      <div className="rounded-2xl border border-[#e8ede8] bg-white p-6 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-[#e8ede8] bg-white p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#f1f5f2] pb-4">
           <div>
             <h3 className="text-sm font-bold text-[#1f2f27]">Quản lý cấu hình thuế VAT</h3>

@@ -38,6 +38,16 @@ export type Product = {
   shop_name?: string | null;
   base_price?: number;
   customer_price?: number;
+  /** Giá theo nhóm khách hàng trước khi áp dụng Sale */
+  list_price?: number;
+  sale_price?: number | null;
+  sale_start_at?: string | null;
+  sale_end_at?: string | null;
+  sale_status?: 'NONE' | 'SCHEDULED' | 'ACTIVE' | 'EXPIRED';
+  /** Tồn kho thực tế trên kệ */
+  stock?: number;
+  /** Đang giữ chỗ cho đơn đã xác nhận */
+  reserved?: number;
 };
 
 export type Order = {
@@ -45,6 +55,9 @@ export type Order = {
   id: string;
   customer: string;
   customer_name?: string;
+  customer_avatar_url?: string | null;
+  customer_group?: string | null;
+  customer_is_verified?: boolean;
   date: string;
   total: number;
   subtotal?: number;
@@ -70,7 +83,9 @@ export type Order = {
   shipper_name?: string | null;
   shipper_phone?: string | null;
   shipper_vehicle?: string | null;
+  shipper_avatar_url?: string | null;
   note?: string;
+  inventory_state?: 'NONE' | 'RESERVED' | 'SHIPPED' | 'RELEASED' | string;
   lines?: OrderLine[];
   createdAt?: string;
 };
@@ -86,6 +101,12 @@ export type ProductRequest = {
   description?: string;
   admin_response?: string;
   quoted_price?: number | null;
+  product_id?: number | null;
+  linked_product_name?: string | null;
+  linked_product_available?: number | null;
+  handled_by_name?: string | null;
+  customer_phone?: string | null;
+  updated_at?: string | null;
 };
 
 export type PostProductInfo = {
@@ -99,12 +120,56 @@ export type PostProductInfo = {
   available_quantity: number;
   image_url?: string;
   group_prices?: Record<string, number>;
+  /** Giá đặt riêng theo nhóm trong bài (chỉ Shop/Admin nhận) */
+  item_group_prices?: Record<string, number>;
+  /** Giá gốc riêng của mặt hàng trong bài (null = giá chuẩn) */
+  item_list_price?: number | null;
+  product_base_price?: number;
+  /** Nguồn của giá cuối: BASE / GROUP / POST_SALE / PRODUCT_SALE */
+  price_source?: 'BASE' | 'GROUP' | 'POST_SALE' | 'PRODUCT_SALE';
+  /** % chiết khấu nhóm của người xem trong bài */
+  group_discount?: number;
+  post_sale_price?: number | null;
+  quantity_limit?: number | null;
+  sold_quantity?: number;
+  remaining_quantity?: number | null;
+  stock_quantity?: number;
+  /** Giá theo nhóm của người xem trước Sale; effective_price = giá cuối cùng */
+  list_price?: number;
+  on_sale?: boolean;
+  sale_percent?: number;
+  /** Sale programme of the product itself */
+  product_sale_price?: number | null;
+  sale_start_at?: string | null;
+  sale_end_at?: string | null;
+  sale_status?: 'NONE' | 'SCHEDULED' | 'ACTIVE' | 'EXPIRED';
+};
+
+export type PostComment = {
+  id: number;
+  post_id: number;
+  user_id: number;
+  author_name: string;
+  author_role?: string | null;
+  /** Customer group code of a CUSTOMER author. */
+  author_group?: string | null;
+  author_avatar_url?: string | null;
+  content: string;
+  created_at: string;
+};
+
+export type FeedSidebar = {
+  best_sellers: { product_id: number; name: string; unit: string; image_url: string; sold: number }[];
+  best_sellers_period: 'TODAY' | '7_DAYS';
+  deals_for_you: { post_id: number; post_title: string; product_id: number; name: string; unit: string; image_url: string; price: number; base_price: number; saving_percent: number; on_sale: boolean }[];
+  top_shops: { shop_id: number; name: string; avatar_url?: string | null; completed_orders: number; rating: number; review_count: number }[];
 };
 
 export type Post = {
   id: number;
   author_id: number;
   author_name?: string;
+  author_avatar_url?: string | null;
   shop_name?: string;
   title: string;
   content: string;
@@ -117,10 +182,20 @@ export type Post = {
   quantity_limit?: number | null;
   target_audience: 'ALL' | 'INDIVIDUAL' | 'GROUP' | 'COLLECTIVE' | 'CUSTOM_GROUP';
   target_customer_group?: string | null;
+  /** Bài dành cho nhiều nhóm */
+  target_groups?: string[];
   original_price?: number | null;
   sale_price?: number | null;
   effective_price?: number | null;
   group_prices?: string;
+  /** Chiết khấu % theo nhóm (khách hàng chỉ nhận nhóm của mình) */
+  group_discounts?: Record<string, number>;
+  program_status?: 'UPCOMING' | 'ACTIVE' | 'ENDED';
+  like_count?: number;
+  liked_by_me?: boolean;
+  comment_count?: number;
+  /** Latest comments, shown directly under the post */
+  recent_comments?: PostComment[];
   order_start_at?: string | null;
   order_end_at?: string | null;
   delivery_time_text?: string;

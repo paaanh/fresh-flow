@@ -61,16 +61,16 @@ export default function ReviewModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="review-modal-title" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl sm:p-6">
         <div className="flex justify-between items-center pb-3 border-b border-[#edf2ee]">
           <div>
-            <h3 className="font-extrabold text-[#1a2d24] text-base">
+            <h3 id="review-modal-title" className="font-extrabold text-[#1a2d24] text-base">
               {type === 'product' ? 'Đánh giá sản phẩm' : 'Đánh giá chất lượng Shipper'}
             </h3>
             <p className="text-xs text-[#7d8f85] mt-0.5">{targetTitle}</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} aria-label="Đóng" className="-mr-2 flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600">
             <FontAwesomeIcon icon={faXmark} />
           </button>
         </div>

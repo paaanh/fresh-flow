@@ -32,6 +32,35 @@ interface ShipperPortalViewProps {
   initialTab?: 'assigned' | 'available' | 'history';
 }
 
+/** Amount the shipper must collect: outstanding COD debt, nothing for prepaid orders. */
+export function codToCollect(order: Order) {
+  if ((order.payment_method || 'COD') !== 'COD') return 0;
+  if (order.payment_status === 'PAID') return 0;
+  return order.debt_amount && order.debt_amount > 0 ? order.debt_amount : order.total;
+}
+
+function PaymentChip({ order, money }: { order: Order; money: (n: number) => string }) {
+  const due = codToCollect(order);
+  return due > 0 ? (
+    <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-200">Thu COD {money(due)}</span>
+  ) : (
+    <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-200">Đã thanh toán · {order.payment_method}</span>
+  );
+}
+
+function OrderLines({ order }: { order: Order }) {
+  if (!order.lines?.length) return <div className="text-[11px] text-slate-400">{order.items}</div>;
+  return (
+    <ul className="flex flex-wrap gap-1.5">
+      {order.lines.map((line, idx) => (
+        <li key={idx} className="rounded-lg border border-[#e6ede8] bg-[#f7faf8] px-2 py-0.5 text-[11px] text-[#3a4d42]">
+          {line.name} × <b>{line.quantity}</b> {line.unit}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function ShipperPortalView({
   currentUser,
   assignedOrders,
@@ -46,9 +75,20 @@ export default function ShipperPortalView({
   const [activeTab, setActiveTab] = useState<'assigned' | 'available' | 'history'>(initialTab);
   const [completingOrder, setCompletingOrder] = useState<Order | null>(null);
   const [collectedCash, setCollectedCash] = useState<number>(0);
+  const [claimingId, setClaimingId] = useState<number | null>(null);
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
   const [orderHistoryLogs, setOrderHistoryLogs] = useState<any[]>([]);
   useEffect(() => setActiveTab(initialTab), [initialTab]);
+
+  const handleClaim = async (orderApiId: number) => {
+    setClaimingId(orderApiId);
+    try {
+      await onClaimOrder(orderApiId);
+      setActiveTab('assigned');
+    } finally {
+      setClaimingId(null);
+    }
+  };
 
   const handleOpenDetail = (order: Order) => {
     setDetailOrder(order);
@@ -73,7 +113,7 @@ export default function ShipperPortalView({
 
   const handleOpenCompleteModal = (order: Order) => {
     setCompletingOrder(order);
-    setCollectedCash(order.total);
+    setCollectedCash(codToCollect(order));
   };
 
   const handleConfirmComplete = async (e: React.FormEvent) => {
@@ -151,8 +191,8 @@ export default function ShipperPortalView({
                 className="overflow-hidden rounded-2xl border border-[#e8ede8] bg-white p-5 shadow-sm space-y-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#f1f5f2] pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-extrabold text-[#1a2d24] text-base">{order.id}</span>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="break-all text-base font-extrabold text-[#1a2d24]">{order.id}</span>
                     <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-bold text-blue-700">
                       {order.status}
                     </span>
@@ -161,11 +201,9 @@ export default function ShipperPortalView({
                     </span>
                   </div>
 
-                  <div className="text-right">
-                    <span className="text-xs text-[#809187]">Cần thu COD: </span>
-                    <span className="text-base font-extrabold text-[#176b52]">{money(order.total)}</span>
-                  </div>
+                  <PaymentChip order={order} money={money} />
                 </div>
+                <OrderLines order={order} />
 
                 {/* Recipient details */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 text-xs text-[#43564c]">
@@ -177,9 +215,9 @@ export default function ShipperPortalView({
                     </div>
                   </div>
 
-                  <div className="flex items-start gap-2">
+                  <div className="flex min-w-0 items-start gap-2">
                     <FontAwesomeIcon icon={faLocationDot} className="mt-0.5 text-rose-500" />
-                    <div>
+                    <div className="min-w-0 break-words">
                       <a className="font-semibold text-[#176b52] underline" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.delivery_address || order.delivery)}`}>{order.delivery_address || order.delivery} · Mở bản đồ</a>
                       {order.note && <div className="text-[11px] text-[#819287]">Ghi chú: {order.note}</div>}
                     </div>
@@ -248,19 +286,28 @@ export default function ShipperPortalView({
                 key={order.id}
                 className="flex flex-col justify-between rounded-2xl border border-[#e8ede8] bg-white p-4 shadow-sm sm:flex-row sm:items-center gap-4"
               >
-                <div>
-                  <div className="font-bold text-[#1f2d26]">{order.id}</div>
-                  <div className="text-xs text-[#627369]">
-                    Giao tới: {order.delivery_address || order.delivery} · Thu COD: <b className="text-[#176b52]">{money(order.total)}</b>
+                <div className="min-w-0 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="break-all font-bold text-[#1f2d26]">{order.id}</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-[#5d6e64]">{order.delivery}</span>
+                    <PaymentChip order={order} money={money} />
                   </div>
+                  <div className="break-words text-xs text-[#627369]">
+                    {order.shop_name ? <>Lấy tại: <b>{order.shop_name}</b> · </> : null}
+                    Giao tới: {order.delivery_address || order.delivery} · Người nhận: <b>{order.recipient_name || order.customer}</b>
+                    {order.recipient_phone ? ` (${order.recipient_phone})` : ''}
+                  </div>
+                  <OrderLines order={order} />
                   {(order.delivery_address || order.delivery) && <a target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(order.delivery_address || order.delivery)}`} className="text-xs font-semibold text-blue-700 underline">Xem tuyến đường</a>}
                 </div>
 
                 <button
-                  onClick={() => onClaimOrder(order.apiId!)}
-                  className="rounded-xl bg-[#205493] px-4 py-2 text-xs font-bold text-white shadow hover:bg-[#184275]"
+                  type="button"
+                  disabled={claimingId === order.apiId}
+                  onClick={() => handleClaim(order.apiId!)}
+                  className="shrink-0 rounded-xl bg-[#205493] px-4 py-2 text-xs font-bold text-white shadow hover:bg-[#184275] disabled:opacity-50"
                 >
-                  Nhận giao đơn này
+                  {claimingId === order.apiId ? 'Đang nhận đơn…' : 'Nhận giao đơn này'}
                 </button>
               </div>
             ))}
@@ -431,6 +478,9 @@ export default function ShipperPortalView({
                 <div>Đơn hàng: <b>{completingOrder.id}</b></div>
                 <div>Khách hàng: <b>{completingOrder.customer}</b></div>
                 <div>Tổng tiền đơn: <b>{money(completingOrder.total)}</b></div>
+                {(completingOrder.paid_amount || 0) > 0 && (completingOrder.payment_method || "COD") === "COD" && (
+                  <div>Khách đã trả trước: <b>{money(completingOrder.paid_amount || 0)}</b> · Cần thu thêm: <b>{money(codToCollect(completingOrder))}</b></div>
+                )}
               </div>
 
               <div>

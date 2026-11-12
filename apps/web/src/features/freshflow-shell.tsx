@@ -1,0 +1,1787 @@
+'use client';
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  faArrowRight,
+  faBars,
+  faBell,
+  faCheck,
+  faCircleQuestion,
+  faClipboardList,
+  faComments,
+  faNewspaper,
+  faMotorcycle,
+  faPlus,
+  faRightFromBracket,
+  faSeedling,
+  faShoppingCart,
+  faStar,
+  faStore,
+  faUser,
+  faUserGroup,
+  faXmark,
+} from '@fortawesome/free-solid-svg-icons';
+
+import { Badge, Button } from '@/features/customer/pages/shared-ui';
+import CategoryManagerModal, { categoryPath, categoryTree, categoryWithChildren, type CategoryNode } from '@/components/category-manager-modal';
+import BulkProductsModal from '@/components/bulk-products-modal';
+import { formatQty, minQty, normalizeQty, roundQty } from '@/lib/quantity';
+import { ProductDetail, ProductGrid, ProductsPanel } from '@/features/customer/pages/catalog';
+import { OrderDetailView, OrderTable, OrdersView } from '@/features/customer/pages/orders';
+import { RequestsView, type RequestFulfillment } from '@/features/customer/pages/requests';
+import { Help, GuidePage } from '@/features/customer/pages/help';
+import { Cart } from '@/features/customer/pages/cart';
+import ProductPhoto from '@/components/product-photo';
+import UserAvatar from '@/components/user-avatar';
+import GlobalSearch from '@/components/global-search';
+import { normalizeSearch } from '@/lib/search';
+import { api, unwrapList, freshflow, authToken } from '@/lib/api';
+import { allocateOrderItems } from '@/lib/order-payload';
+import { cartCount as countCart, cartKey, cartLines, cartTotal as sumCart, type Cart as CartState } from '@/lib/cart';
+import { ApiProfile, ApiCheckout, type CheckoutDetails } from '@/features/api-panels';
+import { RealtimeClient } from '@/lib/realtime';
+import { usePersistentState } from '@/hooks/use-persistent-state';
+import type {
+  Order,
+  Product,
+  ProductRequest,
+  Post,
+  VatConfig,
+  ProductReview,
+  ChatMessage,
+  Conversation,
+  FinancialSummary,
+  CustomerGroup,
+  User as DomainUser,
+} from '@/types/domain';
+import HomePage from '@/features/home-page';
+import { InventoryView, Deliveries, CustomersView, ReportsPanel, ModerationView, SettingsView, AdminNotificationsView, resolveNotificationLink } from '@/features/admin/pages';
+import { adminSections, customerSections, defaultFinancialSummary, money, normalizeOrder, normalizeProduct, normalizeRequest, shipperSections, shopSections, titleMap, toApiOrderStatus } from '@/features/customer/page-model';
+
+// Specialized module components
+import Newfeed from '@/components/newfeed';
+import AdminDashboardView from '@/components/admin-dashboard-view';
+import ShopPortalView from '@/components/shop-portal-view';
+import ShipperPortalView from '@/components/shipper-portal-view';
+import ChatModal from '@/components/chat-modal';
+import ChatView from '@/components/chat-view';
+import ReviewModal from '@/components/reviews-modal';
+import ProductEditorModal, { salePayload, type ProductDraft } from '@/components/product-editor-modal';
+
+const SNAPSHOT_CACHE_PREFIX = 'freshflow-snap-v1:';
+
+function snapshotCacheKey(token?: string | null): string | null {
+  if (!token) return null;
+  return `${SNAPSHOT_CACHE_PREFIX}${token.slice(-16)}`;
+}
+
+function readSnapshotCache(token?: string | null): any | null {
+  if (typeof window === 'undefined') return null;
+  const key = snapshotCacheKey(token);
+  if (!key) return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSnapshotCache(token: string | null | undefined, payload: Record<string, any>): void {
+  if (typeof window === 'undefined') return;
+  const key = snapshotCacheKey(token);
+  if (!key) return;
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function clearSnapshotCache(token?: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const key = snapshotCacheKey(token);
+    if (key) window.sessionStorage.removeItem(key);
+    for (let i = window.sessionStorage.length - 1; i >= 0; i -= 1) {
+      const k = window.sessionStorage.key(i);
+      if (k && k.startsWith(SNAPSHOT_CACHE_PREFIX)) {
+        window.sessionStorage.removeItem(k);
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export default function FreshFlowShell() {
+  const pathname = usePathname() || '/dashboard';
+  const router = useRouter();
+  const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/');
+  const isNewfeedCreate = pathname.endsWith('/newfeed/create');
+  const page =
+    isAdminRoute && pathname === '/admin'
+      ? 'dashboard'
+      : isNewfeedCreate
+        ? 'newfeed-create'
+        : pathname.split('/').filter(Boolean).pop() || 'dashboard';
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const [role, setRole] = usePersistentState<'admin' | 'shop' | 'customer' | 'shipper'>('freshflow-role', 'customer');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
+  /** "Nhập hàng loạt" dialog: add many products, or receive stock for many. */
+  const [bulkOpen, setBulkOpen] = useState<null | 'create' | 'receive'>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [requests, setRequests] = useState<ProductRequest[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [vatConfigs, setVatConfigs] = useState<VatConfig[]>([]);
+  const [vatHistory, setVatHistory] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<ProductReview[]>([]);
+  const [shippers, setShippers] = useState<DomainUser[]>([]);
+  const [customerGroups, setCustomerGroups] = useState<CustomerGroup[]>([]);
+  const [financialSummary, setFinancialSummary] = useState<FinancialSummary>(defaultFinancialSummary);
+
+  const [cart, setCart] = usePersistentState<CartState>('freshflow-cart', {});
+  // Newfeed pagination: the snapshot (and its 4s refresh) loads this many posts
+  const POST_PAGE = 10;
+  const [postLimit, setPostLimit] = useState(POST_PAGE);
+  const postLimitRef = useRef(POST_PAGE);
+  const [postsLoadingMore, setPostsLoadingMore] = useState(false);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('Tất cả');
+  const [toast, setToast] = useState('');
+  const [productEditorOpen, setProductEditorOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState({ name: '', description: '' });
+  const [categoryBusy, setCategoryBusy] = useState(false);
+  const [modal, setModal] = useState('');
+  const [requestDraft, setRequestDraft] = useState({ name: '', category: 'Rau củ', quantity: '2 kg', description: '' });
+  const [requestBusy, setRequestBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState('Tất cả');
+  const [notifications, setNotifications] = useState<{ id: number; title: string; body: string; event_type: string; is_read: boolean; link?: string; created_at?: string }[]>([]);
+  const [currentUser, setCurrentUser] = useState<DomainUser | undefined>();
+  const [loadError, setLoadError] = useState('');
+  const [reload, setReload] = useState(0);
+  const [apiState, setApiState] = useState<'checking' | 'live'>('checking');
+  const [socketState, setSocketState] = useState<'connecting' | 'connected' | 'offline'>('offline');
+
+  // Realtime Chat state
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [activePeerId, setActivePeerId] = useState<number | undefined>();
+  const activePeerRef = useRef<number | undefined>(undefined);
+
+  // Review Modal state
+  const [reviewModalData, setReviewModalData] = useState<{
+    isOpen: boolean;
+    type: 'product' | 'shipper';
+    targetId: number;
+    title: string;
+  }>({ isOpen: false, type: 'product', targetId: 0, title: '' });
+
+  const detailId = pathname.match(/^\/(?:admin\/)?products\/([^/]+)$/)?.[1];
+  const detailProduct = products.find(product => String(product.id) === detailId);
+  const orderDetailId = pathname.match(/^\/(?:admin\/)?orders\/([^/]+)$/)?.[1];
+  const detailOrder = orders.find(order => order.id === decodeURIComponent(orderDetailId || ''));
+  const reviewableCompletedOrder = orders.find(order => ['Hoàn thành', 'COMPLETED'].includes(order.status) && order.lines?.some(line => line.productId));
+
+  const admin = role === 'admin';
+  const shop = role === 'shop';
+  const shipper = role === 'shipper';
+
+  const title =
+    detailProduct?.name ||
+    (detailOrder ? `Đơn ${detailOrder.id}` : undefined) ||
+    (page === 'newfeed-create' ? 'Đăng bài Newfeed mới' : undefined) ||
+    titleMap[page] ||
+    'Tổng quan';
+
+  const links = admin ? adminSections : shop ? shopSections : shipper ? shipperSections : customerSections;
+  const adminOnly = ['inventory', 'deliveries', 'customers', 'reports', 'moderation', 'pricing', 'audit-logs', 'settings'];
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+    if (!authToken.get() && pathname !== '/') {
+      setRole('customer');
+      setApiState('checking');
+      router.replace('/login');
+    }
+  }, [pathname, router, setRole]);
+
+  useEffect(() => {
+    if (!authToken.get()) {
+      setRole('customer');
+      if (pathname !== '/') {
+        setApiState('checking');
+        router.replace('/login');
+        return;
+      }
+      let alive = true;
+      setApiState('checking');
+      setLoadError('');
+      Promise.all([freshflow.products<any>(), freshflow.categories<any>()])
+        .then(([productsResult, categoriesResult]) => {
+          if (!alive) return;
+          const categories = unwrapList<any>(categoriesResult);
+          setCategories(categories.map((category: any) => ({ id: Number(category.id), name: category.name, parent_id: category.parent_id ?? null })));
+          setProducts(unwrapList<any>(productsResult).map(product => normalizeProduct({
+            ...product,
+            category_name: categories.find(category => category.id === product.category_id)?.name,
+          })));
+          setPosts([]);
+          setApiState('live');
+        })
+        .catch(error => {
+          if (!alive) return;
+          setLoadError(error instanceof Error ? error.message : 'Không tải được sản phẩm.');
+          setApiState('live');
+        });
+      return () => { alive = false; };
+    }
+
+    let alive = true;
+    let realtime: RealtimeClient | undefined;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let onFocusSync: (() => void) | undefined;
+    const token = authToken.get();
+    const cached = readSnapshotCache(token);
+    if (cached?.user) {
+      setCurrentUser(cached.user);
+      setRole(String(cached.user.role || 'customer').toLowerCase() as any);
+      if (Array.isArray(cached.categories)) setCategories(cached.categories);
+      if (Array.isArray(cached.products)) setProducts(cached.products);
+      if (Array.isArray(cached.orders)) setOrders(cached.orders);
+      if (Array.isArray(cached.requests)) setRequests(cached.requests);
+      if (Array.isArray(cached.notifications)) setNotifications(cached.notifications);
+      if (Array.isArray(cached.posts)) setPosts(cached.posts);
+      if (Array.isArray(cached.customerGroups)) setCustomerGroups(cached.customerGroups);
+      setApiState('live');
+    } else {
+      setApiState('checking');
+    }
+    setLoadError('');
+
+    const unauthorized = () => {
+      if (alive) {
+        realtime?.close();
+        clearSnapshotCache(token);
+        setApiState('checking');
+        router.replace('/login');
+      }
+    };
+    const onProfileUpdated = (ev: Event) => {
+      const detail = (ev as CustomEvent<DomainUser>).detail;
+      if (alive && detail) setCurrentUser(detail as any);
+    };
+    window.addEventListener('freshflow:unauthorized', unauthorized);
+    window.addEventListener('freshflow:profile_updated', onProfileUpdated);
+
+    async function start() {
+      try {
+        const user = await freshflow.me();
+        if (!alive) return;
+        setCurrentUser(user as any);
+
+        const normalizedRole = user.role.toLowerCase() as 'admin' | 'shop' | 'customer' | 'shipper';
+        setRole(normalizedRole);
+        // Immediately unlock the UI shell once identity is known (~10ms) instead of blocking on all 12 queries.
+        setApiState('live');
+
+        const refreshSnapshot = async () => {
+          const results = await Promise.allSettled([
+            freshflow.catalog<any>().catch(() => freshflow.products<any>()),
+            normalizedRole === 'shipper'
+              ? Promise.all([freshflow.shipperOrders<any>(undefined, false), freshflow.shipperOrders<any>(undefined, true)]).then(([assigned, available]) => [...assigned, ...available])
+              : freshflow.orders<any>(),
+            freshflow.productRequests<any>(),
+            freshflow.notifications<any>(),
+            freshflow.categories<any>(),
+            freshflow.posts<any>(undefined, undefined, undefined, postLimitRef.current),
+            normalizedRole === 'admin' ? freshflow.adminVatConfigs<any>() : freshflow.vatConfigs<any>(),
+            normalizedRole === 'admin' ? freshflow.vatHistory<any>() : Promise.resolve([]),
+            normalizedRole === 'admin'
+              ? freshflow.dashboardFinancialSummary<any>()
+              : normalizedRole === 'shop'
+              ? freshflow.shopFinancialSummary<any>()
+              : Promise.resolve(defaultFinancialSummary),
+            freshflow.shippers(),
+            normalizedRole === 'shop' ? freshflow.shopReviews<any>() : Promise.resolve([]),
+            freshflow.customerGroups<any>(),
+          ]);
+
+          if (!alive || !authToken.get()) return;
+
+          const [
+            prodsRes,
+            ordersRes,
+            reqsRes,
+            noticesRes,
+            catsRes,
+            postsRes,
+            vatRes,
+            vatHistRes,
+            finRes,
+            shippersRes,
+            reviewsRes,
+            groupsRes,
+          ] = results;
+
+          const loadedCats = catsRes.status === 'fulfilled' ? unwrapList<any>(catsRes.value) : [];
+          const mappedCats = loadedCats.map((category: any) => ({ id: Number(category.id), name: category.name, parent_id: category.parent_id ?? null }));
+          if (catsRes.status === 'fulfilled') {
+            setCategories(mappedCats);
+          }
+          const mappedProds =
+            prodsRes.status === 'fulfilled'
+              ? unwrapList<any>(prodsRes.value).map(p =>
+                  normalizeProduct({
+                    ...p,
+                    category_name: loadedCats.find(c => c.id === p.category_id)?.name,
+                  })
+                )
+              : undefined;
+          if (mappedProds) setProducts(mappedProds);
+          const mappedOrders = ordersRes.status === 'fulfilled' ? unwrapList<any>(ordersRes.value).map(normalizeOrder) : undefined;
+          if (mappedOrders) setOrders(mappedOrders);
+          const mappedReqs = reqsRes.status === 'fulfilled' ? unwrapList<any>(reqsRes.value).map(normalizeRequest) : undefined;
+          if (mappedReqs) setRequests(mappedReqs);
+          const mappedNotices = noticesRes.status === 'fulfilled' ? unwrapList<any>(noticesRes.value) : undefined;
+          if (mappedNotices) setNotifications(mappedNotices);
+          const mappedPosts = postsRes.status === 'fulfilled' ? unwrapList<any>(postsRes.value) : undefined;
+          if (mappedPosts) setPosts(mappedPosts);
+          if (vatRes.status === 'fulfilled') {
+            setVatConfigs(unwrapList<any>(vatRes.value));
+          }
+          if (vatHistRes.status === 'fulfilled') {
+            setVatHistory(unwrapList<any>(vatHistRes.value));
+          }
+          if (finRes.status === 'fulfilled') {
+            setFinancialSummary(finRes.value);
+          }
+          if (shippersRes.status === 'fulfilled') {
+            setShippers(unwrapList<any>(shippersRes.value));
+          }
+          if (reviewsRes.status === 'fulfilled') {
+            setReviews(unwrapList<any>(reviewsRes.value));
+          }
+          const mappedGroups = groupsRes.status === 'fulfilled' ? unwrapList<CustomerGroup>(groupsRes.value) : undefined;
+          if (mappedGroups) setCustomerGroups(mappedGroups);
+
+          writeSnapshotCache(authToken.get(), {
+            user,
+            categories: catsRes.status === 'fulfilled' ? mappedCats : undefined,
+            products: mappedProds,
+            orders: mappedOrders,
+            requests: mappedReqs,
+            notifications: mappedNotices,
+            posts: mappedPosts,
+            customerGroups: mappedGroups,
+          });
+          setApiState('live');
+        };
+
+        realtime = new RealtimeClient(
+          event => {
+            if (event.type !== 'connection.ready') {
+              void refreshSnapshot();
+              if (event.type === 'customer_group.updated') {
+                freshflow.me().then(me => {
+                  if (alive) setCurrentUser(me as any);
+                }).catch(() => {});
+              }
+              const eventData = (event.data || {}) as any;
+              if (event.type === 'chat.message' && eventData?.content) {
+                setToast(`Tin nhắn mới từ ${eventData.sender_name || 'Hệ thống'}: "${eventData.content}"`);
+                if (Number(eventData.sender_id) === activePeerRef.current) {
+                  setChatMessages(current => current.some(message => message.id === eventData.id) ? current : [...current, {
+                    id: Number(eventData.id), sender_id: Number(eventData.sender_id), sender_name: eventData.sender_name,
+                    content: eventData.content, receiver_id: user.id, is_read: false, created_at: eventData.created_at,
+                  }]);
+                }
+              } else if (event.type === 'order.new' && eventData?.order_number && Number(eventData.user_id) !== user.id) {
+                setToast(`⚡ Đơn hàng mới ${eventData.order_number} vừa được đặt!`);
+              } else if (event.type === 'order.assigned' && eventData?.order_number) {
+                setToast(`⚡ Đơn ${eventData.order_number} đã được Shipper ${eventData.shipper_name || ''} nhận giao.`);
+              } else if (event.type === 'order.status_changed' && eventData?.order_number && eventData?.status_text) {
+                setToast(`⚡ Đơn ${eventData.order_number} cập nhật trạng thái: ${eventData.status_text}`);
+              }
+            }
+          },
+          state => {
+            if (alive) {
+              setSocketState(state);
+              if (state === 'connected') void refreshSnapshot();
+            }
+          }
+        );
+
+        if (alive && authToken.get()) {
+          realtime.connect();
+          onFocusSync = () => {
+            if (alive && authToken.get() && document.visibilityState === 'visible') {
+              void refreshSnapshot();
+            }
+          };
+          window.addEventListener('focus', onFocusSync);
+          document.addEventListener('visibilitychange', onFocusSync);
+          pollTimer = setInterval(() => {
+            if (alive && authToken.get() && document.visibilityState === 'visible') {
+              void refreshSnapshot();
+            }
+          }, 4000);
+        }
+        await refreshSnapshot();
+      } catch (error) {
+        if (alive && authToken.get()) {
+          setLoadError(error instanceof Error ? error.message : 'Không tải được tài khoản.');
+          setApiState('live');
+        }
+      }
+    }
+
+    void start();
+    return () => {
+      alive = false;
+      window.removeEventListener('freshflow:unauthorized', unauthorized);
+      window.removeEventListener('freshflow:profile_updated', onProfileUpdated);
+      if (onFocusSync) {
+        window.removeEventListener('focus', onFocusSync);
+        document.removeEventListener('visibilitychange', onFocusSync);
+      }
+      if (pollTimer) clearInterval(pollTimer);
+      realtime?.close();
+    };
+  }, [reload]);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const categoryScope = useMemo(() => categoryWithChildren(categories, category), [categories, category]);
+  /** Category names in tree order, with "Cha › Con" labels for selects. */
+  const categoryOrder = useMemo(() => categoryTree(categories).map(t => t.cat.name), [categories]);
+  const categoryLabels = useMemo(() => Object.fromEntries(categories.map(c => [c.name, categoryPath(categories, c)])), [categories]);
+  const topCategories = useMemo(() => categoryTree(categories).filter(t => t.depth === 0).map(t => t.cat.name), [categories]);
+  const filtered = useMemo(
+    () =>
+      products.filter(
+        p => (category === 'Tất cả' || categoryScope.has(p.category)) && normalizeSearch(p.name).includes(normalizeSearch(query))
+      ),
+    [products, category, query, categoryScope]
+  );
+
+  const cartCount = countCart(cart);
+  const cartTotal = sumCart(cartLines(cart, products, posts));
+  /** postId: bought through a Newfeed post (that post's price and quantity limit apply). */
+  const addCart = (id: number, qty = 1, postId?: number | null) => {
+    const unit = products.find(p => p.id === id)?.unit;
+    const safeQty = qty > 0 ? normalizeQty(qty, unit) : minQty(unit);
+    const key = cartKey(id, postId);
+    setCart(v => ({ ...v, [key]: roundQty((v[key] || 0) + safeQty) }));
+    setToast(`Đã thêm ${formatQty(safeQty)} ${unit || 'sản phẩm'} vào giỏ hàng${postId ? ' (giá theo bài đăng)' : ''}`);
+  };
+
+  /** Set the shop-bought quantity of a product (0 removes it) — used by the steppers on product cards. */
+  const setShopQty = (id: number, qty: number) => {
+    const key = String(id);
+    setCart(v => {
+      const next = { ...v };
+      if (qty <= 0) delete next[key];
+      else next[key] = roundQty(qty);
+      return next;
+    });
+  };
+
+  const loadMorePosts = async () => {
+    const next = postLimitRef.current + POST_PAGE;
+    setPostsLoadingMore(true);
+    try {
+      const more = await freshflow.posts<Post>(undefined, undefined, undefined, next);
+      postLimitRef.current = next;
+      setPostLimit(next);
+      setPosts(unwrapList<Post>(more));
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Không tải thêm được bài đăng');
+    } finally {
+      setPostsLoadingMore(false);
+    }
+  };
+
+  const changeOrderStatus = async (id: string, status: string, note?: string) => {
+    if (apiState === 'live') {
+      try {
+        const target = orders.find(order => order.id === id);
+        if (!target?.apiId) throw new Error('Đơn hàng chưa có ID backend.');
+        const response = await api.patch<any>(`/orders/${target.apiId}/status`, {
+          status: toApiOrderStatus(status),
+          note,
+        });
+        setOrders(current => current.map(order => (order.id === id ? normalizeOrder(response) : order)));
+        setToast(`Đã cập nhật đơn ${id} thành "${status}"`);
+        return true;
+      } catch (error) {
+        setToast(error instanceof Error ? error.message : 'Không thể cập nhật đơn hàng');
+        return false;
+      }
+    }
+    setOrders(v => v.map(o => (o.id === id ? { ...o, status } : o)));
+    setToast(`Đã cập nhật đơn ${id} thành "${status}"`);
+    return true;
+  };
+
+  const adjustInventory = async (id: number, delta: number) => {
+    const product = products.find(item => item.id === id);
+    if (!product || !Number.isFinite(delta) || delta === 0 || product.available + delta < 0) return false;
+    if (apiState === 'live') {
+      try {
+        if (delta < 0) await freshflow.removeStock(id, -delta);
+        else
+          await freshflow.createBatch(id, {
+            batch_date: new Date().toISOString(),
+            initial_quantity: delta,
+            is_open: true,
+          });
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Không thể điều chỉnh tồn kho');
+        return false;
+      }
+    }
+    setProducts(current =>
+      current.map(p => (p.id === id ? { ...p, available: Math.max(0, p.available + delta) } : p))
+    );
+    notify('Đã cập nhật số lượng tồn kho.');
+    return true;
+  };
+
+  const updateRequest = async (id: number, status: string, quotedPrice?: number, responseNote?: string, fulfillment?: RequestFulfillment) => {
+    const apiStatus =
+      status === 'Đã báo giá'
+        ? 'QUOTED'
+        : status === 'Đang xử lý'
+          ? 'ACCEPTED'
+          : status === 'Hoàn tất'
+            ? 'FULFILLED'
+            : status === 'Từ chối'
+              ? 'REJECTED'
+              : status;
+    const finalNote =
+      responseNote ||
+      (quotedPrice ? `Đã có nguồn hàng, giá dự kiến ${money(quotedPrice)}` : 'Đã cập nhật tiến độ xử lý yêu cầu');
+    if (apiState === 'live') {
+      try {
+        const updated = await api.patch<any>(`/admin/product-requests/${id}`, {
+          status: apiStatus,
+          quoted_price: quotedPrice,
+          admin_response: finalNote,
+          ...(fulfillment || {}),
+        });
+        setRequests(current => current.map(r => (r.id === id ? normalizeRequest(updated) : r)));
+        notify(
+          apiStatus === 'FULFILLED' && updated?.linked_product_name
+            ? `Đã nhập kho "${updated.linked_product_name}" và báo khách đặt mua.`
+            : apiStatus === 'REJECTED' && !admin && !shop
+              ? 'Đã hủy yêu cầu.'
+              : apiStatus === 'ACCEPTED' && !admin && !shop
+                ? 'Đã đồng ý báo giá — cửa hàng sẽ chuẩn bị hàng cho bạn.'
+                : 'Đã cập nhật yêu cầu và gửi thông báo cho khách.'
+        );
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Không cập nhật được yêu cầu';
+        notify(message);
+        return message;
+      }
+    }
+    setRequests(current =>
+      current.map(r => (r.id === id ? { ...r, status, quoted_price: quotedPrice ?? r.quoted_price, admin_response: finalNote } : r))
+    );
+    notify('Đã cập nhật yêu cầu mặt hàng.');
+    return true;
+  };
+
+  const saveProduct = async (draft: ProductDraft, existing?: Product): Promise<Product | boolean> => {
+    if (apiState !== 'live') {
+      notify('Mất kết nối máy chủ. Sản phẩm chưa được lưu.');
+      return false;
+    }
+    let categoryId = categories.find(category => category.name === draft.category)?.id;
+    if (!categoryId && draft.category.trim()) {
+      try {
+        const createdCat = await freshflow.createCategory<any>(draft.category.trim());
+        categoryId = Number(createdCat.id);
+        setCategories(prev => [...prev, { id: categoryId!, name: createdCat.name }]);
+      } catch {
+        notify('Danh mục này chưa tồn tại. Hãy thêm danh mục mới trước.');
+        return false;
+      }
+    }
+    if (!categoryId) {
+      notify('Danh mục này chưa tồn tại. Hãy chọn một danh mục có sẵn.');
+      return false;
+    }
+    try {
+      const payload = { name: draft.name.trim(), description: draft.description.trim(), category_id: categoryId, unit: draft.unit.trim(), base_price: draft.price, image_url: draft.image_url || null, ...salePayload(draft) };
+      if (existing) {
+        const updated = await freshflow.updateProduct<any>(existing.id, payload);
+        setProducts(current => current.map(item => item.id === existing.id ? normalizeProduct({ ...updated, category_name: draft.category }) : item));
+        notify('Đã cập nhật mặt hàng.');
+      } else {
+        const created = await freshflow.createProduct<any>({ ...payload, shop_id: shop ? currentUser?.id : undefined });
+        if (draft.stock > 0) await freshflow.createBatch(created.id, { batch_date: new Date().toISOString(), initial_quantity: draft.stock, is_open: true });
+        const createdProduct = normalizeProduct({ ...created, category_name: draft.category, available_quantity: draft.stock, stock_quantity: draft.stock });
+        setProducts(current => [createdProduct, ...current]);
+        notify('Đã thêm mặt hàng vào cửa hàng.');
+        return createdProduct;
+      }
+      return true;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Không lưu được mặt hàng.');
+      return false;
+    }
+  };
+
+  const deleteProduct = async (id: number) => {
+    if (apiState === 'live') {
+      try {
+        await api.delete(`/admin/products/${id}`);
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Không xóa được sản phẩm');
+        return;
+      }
+    }
+    const name = products.find(p => p.id === id)?.name;
+    setProducts(current => current.filter(p => p.id !== id));
+    notify(name ? `Đã xóa "${name}".` : 'Đã xóa sản phẩm.');
+  };
+
+  const markNotificationRead = async (id: number) => {
+    try {
+      await freshflow.readNotification(id);
+      setNotifications(current => current.map(item => item.id === id ? { ...item, is_read: true } : item));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Không cập nhật được thông báo.');
+    }
+  };
+
+  const clearNotifications = async () => {
+    if (apiState === 'live') {
+      try {
+        const notices = await freshflow.notifications<{ id: number; is_read: boolean }>();
+        await Promise.all(notices.filter(item => !item.is_read).map(item => freshflow.readNotification(item.id)));
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Không thể cập nhật thông báo');
+        return;
+      }
+    }
+    setNotifications(current => current.map(item => ({ ...item, is_read: true })));
+    notify('Đã đánh dấu tất cả thông báo là đã đọc.');
+  };
+
+  const placeOrder = async (details: CheckoutDetails): Promise<boolean> => {
+    if (!cartCount) {
+      notify('Giỏ hàng đang trống');
+      return false;
+    }
+    if (apiState !== 'live' || !authToken.get()) {
+      sessionStorage.setItem('freshflow-after-login', '/checkout');
+      notify('Đăng nhập để tiếp tục tạo đơn hàng.');
+      router.push('/login');
+      return false;
+    }
+
+    if (apiState === 'live') {
+      try {
+        const catalog = await freshflow.catalog<any>();
+        const items = allocateOrderItems(catalog, cart);
+        const pickup = details.delivery === 'Điểm giao tập trung';
+        const addresses = pickup ? [] : await freshflow.addresses<any>();
+        const address = addresses.find(item => Number(item.id) === details.addressId);
+        if (!pickup && !address) throw new Error('Vui lòng chọn địa chỉ giao hàng hợp lệ.');
+
+        const created = await freshflow.createOrder<any>({
+          items,
+          delivery_type: pickup ? 'PICKUP' : 'HOME',
+          delivery_address: address
+            ? [address.line1, address.ward, address.district, address.city].filter(Boolean).join(', ')
+            : '',
+          recipient_name: address?.recipient || currentUser?.full_name || '',
+          recipient_phone: address?.phone || currentUser?.phone || '',
+          delivery_slot_id: details.deliverySlotId ?? null,
+          payment_method: details.paymentMethod || 'COD',
+          note: details.note,
+        });
+
+        setOrders(current => [normalizeOrder(created), ...current]);
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Không thể gửi đơn hàng');
+        return false;
+      }
+    }
+
+    setCart({});
+    router.push('/orders');
+    setToast('Đã gửi đơn hàng thành công! Đang chờ xác nhận.');
+    return true;
+  };
+
+  const handleCreatePost = async (postData: any) => {
+    try {
+      const created = await freshflow.createPost<Post>(postData);
+      setPosts(current => [created, ...current]);
+      const [prodsRes, catsRes] = await Promise.all([
+        freshflow.catalog<any>().catch(() => freshflow.products<any>()),
+        freshflow.categories<any>(),
+      ]);
+      const loadedCats = unwrapList<any>(catsRes);
+      setCategories(loadedCats.map((c: any) => ({ id: Number(c.id), name: c.name, parent_id: c.parent_id ?? null })));
+      setProducts(
+        unwrapList<any>(prodsRes).map(p =>
+          normalizeProduct({
+            ...p,
+            category_name: loadedCats.find((c: any) => c.id === p.category_id)?.name,
+          })
+        )
+      );
+      notify('Đã đăng bài lên Newfeed!');
+      return true;
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Không thể đăng bài');
+      return false;
+    }
+  };
+
+  const handleUpdatePost = async (postId: number, postData: any) => {
+    try {
+      const updated = await freshflow.updatePost<Post>(postId, postData);
+      setPosts(current => current.map(p => (p.id === postId ? updated : p)));
+      notify('Đã cập nhật bài đăng.');
+      return true;
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Không thể cập nhật bài đăng');
+      return false;
+    }
+  };
+
+  const handleDeletePost = async (postId: number) => {
+    try {
+      await freshflow.deletePost(postId);
+      setPosts(current => current.filter(p => p.id !== postId));
+      notify('Đã xóa bài đăng.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Không thể xóa bài đăng');
+    }
+  };
+
+  const handleUpdateVat = async (id: number, rate: number, note: string) => {
+    try {
+      const updated = await freshflow.updateVatConfig<VatConfig>(id, {
+        tax_name: 'VAT',
+        rate,
+        note,
+      });
+      setVatConfigs(current => current.map(v => (v.id === id ? updated : v)));
+      const history = await freshflow.vatHistory<any>();
+      setVatHistory(unwrapList<any>(history));
+      notify(`Đã cập nhật thuế suất VAT thành ${rate * 100}%`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi cập nhật VAT');
+    }
+  };
+
+  const handleAssignShipper = async (orderApiId: number, shipperId: number) => {
+    try {
+      const updated = await freshflow.assignShipper<any>(orderApiId, shipperId);
+      setOrders(current => current.map(o => (o.apiId === orderApiId ? normalizeOrder(updated) : o)));
+      notify('Đã phân công Shipper giao đơn hàng.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi phân công');
+    }
+  };
+
+  const handleReplyReview = async (reviewId: number, reply: string) => {
+    try {
+      const updated = await freshflow.replyReview<ProductReview>(reviewId, reply);
+      setReviews(current => current.map(r => (r.id === reviewId ? updated : r)));
+      notify('Đã gửi phản hồi đánh giá.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi phản hồi');
+    }
+  };
+
+  // Shipper actions
+  const handleShipperClaim = async (orderId: number) => {
+    try {
+      const updated = await freshflow.claimShipperOrder<any>(orderId);
+      setOrders(current => current.map(o => (o.apiId === orderId ? normalizeOrder(updated) : o)));
+      notify('Đã nhận giao đơn hàng!');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi nhận đơn');
+    }
+  };
+
+  const handleShipperPickup = async (orderId: number) => {
+    try {
+      const updated = await freshflow.shipperPickup<any>(orderId);
+      setOrders(current => current.map(o => (o.apiId === orderId ? normalizeOrder(updated) : o)));
+      notify('Đã xác nhận lấy hàng từ Shop.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi cập nhật');
+    }
+  };
+
+  const handleShipperDelivering = async (orderId: number) => {
+    try {
+      const updated = await freshflow.shipperDelivering<any>(orderId);
+      setOrders(current => current.map(o => (o.apiId === orderId ? normalizeOrder(updated) : o)));
+      notify('Bắt đầu giao đơn hàng.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi cập nhật');
+    }
+  };
+
+  const handleShipperComplete = async (orderId: number, paidAmount: number) => {
+    try {
+      const updated = await freshflow.shipperComplete<any>(orderId, paidAmount);
+      setOrders(current => current.map(o => (o.apiId === orderId ? normalizeOrder(updated) : o)));
+      notify(`Giao thành công! Đã thu COD: ${money(paidAmount)}`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Lỗi hoàn tất');
+    }
+  };
+
+  // Chat actions
+  const openChatWith = async (peerId?: number, openModal = true) => {
+    if (openModal) setIsChatOpen(true);
+    if (peerId) {
+      setActivePeerId(peerId);
+      activePeerRef.current = peerId;
+    }
+    try {
+      const convs = await freshflow.chatConversations<Conversation>();
+      const conversationList = unwrapList<Conversation>(convs);
+      setConversations(conversationList);
+      const targetPeerId = peerId || activePeerRef.current || conversationList[0]?.peer_id;
+      if (targetPeerId) {
+        setActivePeerId(targetPeerId);
+        activePeerRef.current = targetPeerId;
+      }
+      const msgs = await freshflow.chatMessages<ChatMessage>(targetPeerId);
+      setChatMessages(unwrapList<ChatMessage>(msgs));
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSelectPeer = (peerId: number, peerUser?: any) => {
+    setActivePeerId(peerId);
+    activePeerRef.current = peerId;
+    if (peerUser) {
+      setConversations(prev => {
+        if (prev.some(c => c.peer_id === peerId)) return prev;
+        return [
+          {
+            peer_id: peerId,
+            peer_name: peerUser.shop_name || peerUser.full_name || `Người dùng #${peerId}`,
+            peer_role: peerUser.role,
+            avatar_url: peerUser.avatar_url,
+            last_message: 'Bắt đầu cuộc trò chuyện...',
+            last_time: new Date().toISOString(),
+            unread: 0,
+            order_id: null,
+          },
+          ...prev,
+        ];
+      });
+    }
+    freshflow
+      .chatMessages<ChatMessage>(peerId)
+      .then(msgs => setChatMessages(unwrapList<ChatMessage>(msgs)))
+      .catch(() => setChatMessages([]));
+  };
+
+  useEffect(() => {
+    if (page === 'chat') void openChatWith(undefined, false);
+  }, [page]);
+
+  const handleSendChatMessage = async (content: string, peerId?: number, orderId?: number) => {
+    try {
+      const sent = await freshflow.sendChatMessage<ChatMessage>({
+        receiver_id: peerId,
+        order_id: orderId,
+        content,
+      });
+      setChatMessages(prev => [...prev, sent]);
+    } catch (e) {
+      notify('Không gửi được tin nhắn.');
+    }
+  };
+
+  // Review submission
+  const handleOpenReview = (targetId: number, title: string, type: 'product' | 'shipper') => {
+    setReviewModalData({ isOpen: true, type, targetId, title });
+  };
+
+  const handleSubmitReview = async (data: any) => {
+    try {
+      if (reviewModalData.type === 'product') {
+        await freshflow.createProductReview(data.product_id, data);
+        notify('Cảm ơn bạn đã đánh giá sản phẩm!');
+      } else {
+        await freshflow.reviewShipper(data.order_id, data);
+        notify('Cảm ơn bạn đã đánh giá tài xế giao hàng!');
+      }
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Không gửi được đánh giá');
+    }
+  };
+
+  const handleCreateCustomerGroup = async (data: {
+    code: string;
+    name: string;
+    description?: string;
+    discount_percent?: number;
+  }): Promise<CustomerGroup | undefined> => {
+    try {
+      const created = await freshflow.createCustomerGroup<CustomerGroup>(data);
+      setCustomerGroups(prev => (prev.some(g => g.code === created.code) ? prev : [...prev, created]));
+      notify(`Đã tạo nhóm khách hàng "${created.name}".`);
+      return created;
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Không tạo được nhóm khách hàng');
+      return undefined;
+    }
+  };
+
+  const notify = (text: string) => setToast(text);
+
+  const logout = async () => {
+    clearSnapshotCache(authToken.get());
+    authToken.clear();
+    setCart({});
+    setProducts([]);
+    setOrders([]);
+    setRequests([]);
+    setNotifications([]);
+    setCurrentUser(undefined);
+    setRole('customer');
+    router.push('/login');
+  };
+
+
+  const link = (href: string, name: string, icon: any, count?: string) => {
+    const isCurrent = page === href.split('/').pop();
+    return (
+      <Link
+        key={name}
+        href={href}
+        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] transition ${isCurrent ? 'nav-active font-bold text-[#176b52] bg-[#f0f7f3]' : 'text-[#64736b] hover:bg-slate-50 hover:text-[#233b30]'
+          }`}
+      >
+        <FontAwesomeIcon icon={icon} className="w-4 text-[14px]" />
+        <span className="flex-1">{name}</span>
+        {count && <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-bold text-[#66736c] shadow-sm">{count}</span>}
+      </Link>
+    );
+  };
+
+  const statusTone = (status: string) =>
+    status === 'Hoàn thành'
+      ? 'green'
+      : status === 'Đang giao'
+        ? 'blue'
+        : status === 'Từ chối' || status === 'Đã hủy'
+          ? 'red'
+          : status === 'Chờ xác nhận' || status === 'Chờ duyệt'
+            ? 'orange'
+            : 'gray';
+
+  if (apiState === 'checking') return <div className="p-8 text-xs font-semibold text-slate-500">Đang khởi tạo kết nối hệ thống FreshFlow…</div>;
+  if (loadError && apiState === 'live') {
+    return (
+      <div className="panel m-8 space-y-4 p-6">
+        <h1 className="font-bold">Chưa tải được dữ liệu hệ thống</h1>
+        <p role="alert" className="text-sm text-rose-700">{loadError}</p>
+        <Button onClick={() => setReload(v => v + 1)}>Thử lại</Button>
+        <Button kind="secondary" onClick={logout}>Đăng nhập lại</Button>
+      </div>
+    );
+  }
+
+  if (pathname === '/') return <HomePage products={products} addCart={addCart} money={money} cartCount={cartCount} />;
+
+  return (
+    <div className="min-h-screen overflow-x-hidden bg-[#fcfdfc]">
+      {/* Mobile Sidebar Overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 backdrop-blur-xs lg:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Responsive Sidebar (Slide-over on mobile < lg, fixed on desktop lg+) */}
+      <aside
+        className={`desktop-sidebar fixed inset-y-0 left-0 z-40 flex w-[260px] flex-col border-r border-[#e8ede8] bg-white px-5 py-6 shadow-sm transition-transform duration-200 lg:z-20 lg:translate-x-0 ${
+          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="mb-7 flex items-center justify-between px-2">
+          <Link href={admin ? '/admin/dashboard' : shop ? '/shop' : shipper ? '/shipper' : '/dashboard'} className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#176b52] text-white shadow-sm">
+              <FontAwesomeIcon icon={faSeedling} />
+            </div>
+            <div>
+              <div className="text-[18px] font-extrabold tracking-tight text-[#1a2e24]">
+                freshflow<span className="text-[#43967b]">.</span>
+              </div>
+              <div className="text-[10px] font-bold uppercase tracking-[.16em] text-[#97a29b]">Nông sản mỗi ngày</div>
+            </div>
+          </Link>
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 lg:hidden"
+            aria-label="Đóng menu"
+          >
+            <FontAwesomeIcon icon={faXmark} />
+          </button>
+        </div>
+
+        {/* Current Role Card */}
+        <div className="mb-5 rounded-2xl bg-[#f6faf7] border border-[#e2ece5] p-3">
+          <div className="mb-1.5 text-[10px] font-extrabold uppercase tracking-[.14em] text-[#869b8f]">VAI TRÒ HIỆN TẠI</div>
+          <div className="flex w-full items-center gap-2.5 rounded-xl bg-white p-2.5 text-left shadow-sm">
+            <div className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm ${admin ? 'bg-emerald-100 text-emerald-800' : shop ? 'bg-amber-100 text-amber-800' : shipper ? 'bg-blue-100 text-blue-800' : 'bg-teal-100 text-teal-800'}`}>
+              <FontAwesomeIcon icon={admin ? faUserGroup : shop ? faStore : shipper ? faMotorcycle : faUser} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-extrabold text-[#1f2d25] truncate">
+                {admin ? 'Admin' : shop ? 'Shop' : shipper ? 'Shipper' : 'Khách hàng'}
+              </div>
+              <div className="text-[10px] text-[#89958e] truncate">
+                {currentUser?.full_name || ''}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Nav Links */}
+        <nav className="scrollbar-hide flex-1 space-y-5 overflow-y-auto pr-1">
+          {links.map(section => (
+            <div key={section.label}>
+              <div className="mb-2 px-3 text-[10px] font-extrabold tracking-[.16em] text-[#a2aca5]">{section.label}</div>
+              <div className="space-y-1">{section.links.map((item: any) => link(item.href, item.name, item.icon, item.count))}</div>
+            </div>
+          ))}
+        </nav>
+
+        {/* Support Card */}
+        <div className="mt-4 rounded-2xl bg-[#f2f8f4] border border-[#dceddf] p-3 text-xs">
+          <div className="mb-1 flex items-center gap-2 font-bold text-[#1b503d]">
+            <FontAwesomeIcon icon={faCircleQuestion} /> Trợ giúp & Kết nối
+          </div>
+          <p className="text-[11px] leading-relaxed text-[#5f7a6a]">Hỗ trợ kỹ thuật và giải đáp thắc mắc 24/7.</p>
+          <button onClick={() => openChatWith()} className="-mx-2 mt-1 flex items-center gap-1 rounded-lg px-2 py-2 text-[11px] font-bold text-[#176b52] hover:bg-emerald-100/60">
+            Mở khung chat hỗ trợ <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
+          </button>
+        </div>
+
+        <button onClick={logout} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2 text-xs font-semibold text-[#7e8a82] hover:bg-slate-50">
+          <FontAwesomeIcon icon={faRightFromBracket} /> Đăng xuất
+        </button>
+      </aside>
+
+      {/* Main Container */}
+      <main className={`main-content min-h-screen min-w-0 max-w-full overflow-x-hidden lg:pl-[260px] ${!admin && !shop && !shipper && page !== 'chat' && page !== 'newfeed-create' ? 'pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-16' : 'pb-16'}`}>
+        {/* Top Header */}
+        <header className="relative z-20 flex h-14 items-center justify-between gap-2 border-b border-[#e9ede8] bg-white px-3 sm:h-[72px] sm:px-8 lg:sticky lg:top-0 lg:bg-white/90 lg:backdrop-blur">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#176b52] hover:bg-slate-50 sm:h-10 sm:w-10 lg:hidden"
+              aria-label="Mở menu điều hướng"
+            >
+              <FontAwesomeIcon icon={faBars} />
+            </button>
+            <div className="min-w-0 truncate text-xs font-bold text-[#45574d] sm:text-[11px] sm:font-medium sm:text-[#98a39c]">
+              <span className="hidden lg:inline">FreshFlow <span className="mx-1">/</span> </span>
+              <span className="font-bold text-[#45574d]">{title}</span>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+            <GlobalSearch key={`${admin}-${apiState}`} admin={admin} apiState={apiState} products={products} orders={orders} requests={requests} />
+
+            {/* Chat Icon Button */}
+            <button
+              onClick={() => openChatWith()}
+              className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#57695f] hover:bg-slate-50 sm:h-10 sm:w-10"
+              title="Mở tin nhắn trực tiếp"
+            >
+              <FontAwesomeIcon icon={faComments} className="text-sm text-[#176b52]" />
+            </button>
+
+            {/* Notifications */}
+            <Link
+              href="/notifications"
+              aria-label={notifications.some(item => !item.is_read) ? 'Thông báo (có thông báo chưa đọc)' : 'Thông báo'}
+              className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#57695f] hover:bg-slate-50 sm:h-10 sm:w-10"
+            >
+              <FontAwesomeIcon icon={faBell} className="text-sm" />
+              {notifications.some(item => !item.is_read) && <i className="absolute right-2 top-2 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />}
+            </Link>
+
+            {/* Cart Button (Customer only) */}
+            {!admin && !shop && !shipper && (
+              <Link
+                href="/cart"
+                aria-label={cartCount > 0 ? `Giỏ hàng (${cartCount} sản phẩm)` : 'Giỏ hàng'}
+                className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#57695f] hover:bg-slate-50 sm:h-10 sm:w-10"
+              >
+                <FontAwesomeIcon icon={faShoppingCart} />
+                {cartCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#176b52] text-[10px] font-bold text-white">
+                    {cartCount}
+                  </span>
+                )}
+              </Link>
+            )}
+
+            {/* Profile pill */}
+            <button
+              onClick={() => router.push('/profile')}
+              className="flex items-center gap-2 border-l border-[#e4e9e4] pl-1.5 sm:gap-2.5 sm:pl-3"
+            >
+              <UserAvatar
+                name={currentUser?.full_name || 'Khách hàng'}
+                avatarUrl={currentUser?.avatar_url}
+                size="sm"
+                verified={Boolean(currentUser?.avatar_url)}
+              />
+              <div className="hidden text-left sm:block">
+                <div className="text-xs font-bold text-[#1f2d25]">{currentUser?.full_name || 'Khách hàng'}</div>
+                <div className="text-[10px] text-[#8c9890]">
+                  {admin ? 'Admin' : shop ? (currentUser?.shop_name || 'Shop') : shipper ? 'Shipper' : (customerGroups.find(g => g.code === currentUser?.customer_group)?.name || currentUser?.customer_group || 'Khách hàng')}
+                </div>
+              </div>
+            </button>
+          </div>
+        </header>
+
+        {/* Content Body */}
+        <div className="mx-auto w-full max-w-[1440px] min-w-0 px-3 py-4 sm:px-8 sm:py-7">
+          {/* Breadcrumb Title bar */}
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3 sm:mb-6 sm:gap-4">
+            <div className="min-w-0">
+              <div className="mb-1 hidden text-[11px] font-semibold text-[#83a18c] sm:block">
+                {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'full', timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())}
+              </div>
+              <h1 className="break-words text-lg font-extrabold tracking-tight text-[#1e2e26] sm:text-[24px]">
+                {page === 'dashboard'
+                  ? admin
+                    ? `Bảng điều khiển Admin`
+                    : shop
+                      ? `Kênh Shop`
+                      : shipper
+                        ? `Trung tâm Shipper`
+                        : 'Nông sản tươi ngon hôm nay'
+                  : title}
+              </h1>
+            </div>
+
+            <div className="flex gap-2">
+              {page === 'dashboard' && !admin && !shop && !shipper && (
+                <Link href="/requests">
+                  <Button kind="secondary"><FontAwesomeIcon icon={faPlus} /> Yêu cầu mặt hàng</Button>
+                </Link>
+              )}
+            </div>
+          </div>
+
+          {/* PAGE ROUTING DISPATCH */}
+
+          {/* NEWFEED & NEWFEED CREATE */}
+          {(page === 'newfeed' || page === 'newfeed-create' || (!admin && !shop && !shipper && page === 'dashboard')) && (
+            <Newfeed
+              posts={posts}
+              products={products}
+              categories={categoryOrder}
+              customerGroups={customerGroups}
+              currentUser={currentUser}
+              onAddToCart={addCart}
+              onCreateProduct={async draft => {
+                const saved = await saveProduct(draft);
+                return typeof saved === 'object' ? saved : null;
+              }}
+              hasMorePosts={posts.length >= postLimit}
+              loadingMorePosts={postsLoadingMore}
+              onLoadMorePosts={loadMorePosts}
+              onNotify={notify}
+              onCreatePost={handleCreatePost}
+              onUpdatePost={handleUpdatePost}
+              onDeletePost={handleDeletePost}
+              onCreateCustomerGroup={handleCreateCustomerGroup}
+              money={money}
+              forceCreateMode={page === 'newfeed-create'}
+            />
+          )}
+
+          {/* ADMIN DASHBOARD */}
+          {page === 'dashboard' && admin && (
+            <AdminDashboardView
+              summary={financialSummary}
+              vatConfigs={vatConfigs}
+              vatHistory={vatHistory}
+              recentOrders={orders}
+              onUpdateVat={handleUpdateVat}
+              money={money}
+            />
+          )}
+
+          {/* SHOP PORTAL */}
+          {(page === 'shop' || (page === 'dashboard' && shop) || (shop && ['products', 'orders', 'reviews', 'groups'].includes(page))) && (
+            <ShopPortalView
+              currentUser={currentUser || ({} as any)}
+              products={products}
+              orders={orders}
+              reviews={reviews}
+              shippers={shippers}
+              customerGroups={customerGroups}
+              onAddProduct={() => { setEditingProduct(null); setProductEditorOpen(true); }}
+              onAddCategory={() => setCategoryModalOpen(true)}
+              onBulk={() => setBulkOpen('create')}
+              onEditProduct={product => { setEditingProduct(product); setProductEditorOpen(true); }}
+              onDeleteProduct={deleteProduct}
+              onAdjustInventory={adjustInventory}
+              initialTab={page === 'products' ? 'products' : page === 'orders' ? 'orders' : page === 'reviews' ? 'reviews' : page === 'groups' ? 'groups' : 'overview'}
+              onUpdateOrderStatus={changeOrderStatus}
+              onAssignShipper={handleAssignShipper}
+              onReplyReview={handleReplyReview}
+              onCreateCustomerGroup={handleCreateCustomerGroup}
+              onNotify={notify}
+              money={money}
+              pendingRequests={requests.filter(r => r.status === 'Mới').length}
+            />
+          )}
+
+          {/* SHIPPER PORTAL */}
+          {(page === 'shipper' || (page === 'dashboard' && shipper) || (shipper && page === 'history')) && (
+            <ShipperPortalView
+              currentUser={currentUser || ({} as any)}
+              assignedOrders={orders.filter(o => o.shipper_id === currentUser?.id)}
+              availableOrders={orders.filter(o => !o.shipper_id && (o.status === 'Chờ Shipper lấy hàng' || o.status === 'READY_FOR_PICKUP'))}
+              onClaimOrder={handleShipperClaim}
+              onPickupOrder={handleShipperPickup}
+              onDeliveringOrder={handleShipperDelivering}
+              onCompleteOrder={handleShipperComplete}
+              initialTab={page === 'history' ? 'history' : 'assigned'}
+              money={money}
+            />
+          )}
+
+          {/* PRODUCTS CATALOG */}
+          {page === 'products' && (!shop || admin) && (
+            <ProductsPanel
+              query={query}
+              setQuery={setQuery}
+              admin={admin}
+              products={filtered}
+              categories={topCategories}
+              category={category}
+              setCategory={setCategory}
+              addCart={addCart}
+              money={money}
+              create={() => { setEditingProduct(null); setProductEditorOpen(true); }}
+              createCategory={() => setCategoryModalOpen(true)}
+              bulk={() => setBulkOpen('create')}
+              go={path => router.push(admin && isAdminRoute ? `/admin${path}` : path)}
+              edit={product => { setEditingProduct(product); setProductEditorOpen(true); }}
+              remove={deleteProduct}
+              cart={cart}
+              setQty={setShopQty}
+              groupName={customerGroups.find(g => g.code === currentUser?.customer_group)?.name}
+            />
+          )}
+
+          {/* INVENTORY */}
+          {page === 'inventory' && <InventoryView products={products} money={money} adjust={adjustInventory} />}
+
+          {/* ORDERS */}
+          {page === 'orders' && !shop && (
+            <div className="space-y-4">
+              {/* Review Buttons on completed orders for customers */}
+              {!admin && !shop && !shipper && reviewableCompletedOrder && (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-xs">
+                  <div className="font-bold text-emerald-900 mb-1 flex items-center gap-2">
+                    <FontAwesomeIcon icon={faStar} className="text-yellow-500" /> Đánh giá trải nghiệm đơn hàng
+                  </div>
+                  <p className="text-emerald-800 text-[11px] mb-3">
+                    Bạn có đơn hàng đã giao thành công. Hãy chia sẻ cảm nhận để cửa hàng nâng cao chất lượng nhé!
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleOpenReview(reviewableCompletedOrder.lines?.find(line => line.productId)?.productId || 0, reviewableCompletedOrder.lines?.find(line => line.productId)?.name || 'Nông sản', 'product')}
+                      className="rounded-xl bg-[#176b52] px-3.5 py-1.5 font-bold text-white shadow-sm hover:bg-[#125340]"
+                    >
+                      Đánh giá sản phẩm đã mua
+                    </button>
+                    {reviewableCompletedOrder.shipper_id && <button
+                      onClick={() => handleOpenReview(reviewableCompletedOrder.apiId || 0, 'Tài xế giao hàng', 'shipper')}
+                      className="rounded-xl bg-blue-600 px-3.5 py-1.5 font-bold text-white shadow-sm hover:bg-blue-700"
+                    >
+                      Đánh giá Shipper
+                    </button>}
+                  </div>
+                </div>
+              )}
+              <OrdersView
+                admin={admin}
+                orders={orders}
+                updateStatus={changeOrderStatus}
+                statusTone={statusTone}
+                money={money}
+                tab={activeTab}
+                setTab={setActiveTab}
+              />
+            </div>
+          )}
+
+          {/* DELIVERIES */}
+          {page === 'deliveries' && <Deliveries orders={orders} money={money} change={changeOrderStatus} statusTone={statusTone} />}
+
+          {/* CUSTOMERS & GROUPS */}
+          {page === 'customers' && <CustomersView notify={notify} apiState={apiState} />}
+
+          {/* REQUESTS */}
+          {page === 'requests' && (
+            <RequestsView
+              admin={admin}
+              shop={shop}
+              requests={requests}
+              products={products}
+              categories={categories}
+              currentUserId={currentUser?.id}
+              notify={notify}
+              open={() => setModal('request')}
+              update={updateRequest}
+            />
+          )}
+
+          {/* REPORTS */}
+          {page === 'reports' && <ReportsPanel money={money} apiState={apiState} orders={orders} />}
+
+          {/* MODERATION */}
+          {page === 'moderation' && <ModerationView notify={notify} />}
+
+          {/* SETTINGS */}
+          {page === 'settings' && <SettingsView />}
+
+          {/* HELP & GUIDES */}
+          {page === 'help' && <Help onOpenChat={() => openChatWith()} />}
+          {page === 'order-guide' && <GuidePage type="orders" />}
+          {page === 'delivery-guide' && <GuidePage type="delivery" />}
+
+          {/* ADMIN ONLY ACCESS GUARD */}
+          {adminOnly.includes(page) && !admin && (
+            <div className="panel p-10 text-center">
+              <h2 className="text-base font-bold text-rose-700">Quyền truy cập bị từ chối</h2>
+              <p className="mt-2 text-xs text-slate-500">Khu vực này chỉ dành riêng cho Quản trị viên (Admin).</p>
+            </div>
+          )}
+
+          {page === 'notifications' && (
+            admin || shop ? (
+              <AdminNotificationsView
+                notifications={notifications}
+                notify={notify}
+                onReload={() => setReload(r => r + 1)}
+                markRead={markNotificationRead}
+                clearAll={clearNotifications}
+                onNavigate={href => router.push(href)}
+                senderRole={admin ? 'ADMIN' : 'SHOP'}
+              />
+            ) : (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold">Hộp thư Thông báo nhận được</h2>
+                    <p className="text-xs text-slate-400">Bấm vào thông báo bất kỳ để chuyển thẳng đến trang liên quan</p>
+                  </div>
+                  {notifications.some(item => !item.is_read) && (
+                    <button onClick={() => void clearNotifications()} className="rounded-lg px-2 py-2 text-xs font-bold text-[#176b52] hover:bg-emerald-50">
+                      Đánh dấu tất cả đã đọc
+                    </button>
+                  )}
+                </div>
+                {notifications.length === 0 && (
+                  <div className="panel p-10 text-center text-sm text-slate-500">Bạn chưa có thông báo nào.</div>
+                )}
+                {notifications.map(item => {
+                  const targetHref = resolveNotificationLink(item, shipper ? 'SHIPPER' : 'CUSTOMER');
+                  const isOrderTarget = targetHref.includes('/orders/');
+                  return (
+                    <article
+                      key={item.id}
+                      onClick={() => {
+                        if (!item.is_read) void markNotificationRead(item.id);
+                        router.push(targetHref);
+                      }}
+                      className={`panel flex cursor-pointer items-start gap-3 p-4 transition hover:border-[#176b52]/40 hover:shadow-md ${
+                        item.is_read ? 'opacity-75' : 'border-emerald-200 bg-emerald-50/40'
+                      }`}
+                    >
+                      <span
+                        className={`mt-1 h-2.5 w-2.5 rounded-full shrink-0 ${
+                          item.is_read ? 'bg-slate-300' : 'bg-emerald-600'
+                        }`}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="text-sm font-bold">{item.title}</h3>
+                          <span className="shrink-0 rounded-lg bg-[#eef7f1] px-2.5 py-1 text-[11px] font-bold text-[#176b52]">
+                            {isOrderTarget ? 'Xem đơn hàng →' : 'Xem chi tiết →'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-600">{item.body}</p>
+                        <time className="mt-2 block text-[10px] text-slate-400">
+                          {item.created_at ? new Date(item.created_at).toLocaleString('vi-VN') : item.event_type}
+                        </time>
+                      </div>
+                      {!item.is_read && (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            void markNotificationRead(item.id);
+                          }}
+                          className="shrink-0 rounded-lg px-2 py-2 text-xs font-semibold text-[#176b52] hover:bg-emerald-50"
+                        >
+                          Đã đọc
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
+              </section>
+            )
+          )}
+
+          {/* REALTIME CHAT PAGE */}
+          {page === 'chat' && (
+            <ChatView
+              currentUser={currentUser}
+              conversations={conversations}
+              activePeerId={activePeerId}
+              messages={chatMessages}
+              onSelectPeer={handleSelectPeer}
+              onNewConversation={peer => handleSelectPeer(peer.id, peer)}
+              onSendMessage={handleSendChatMessage}
+            />
+          )}
+
+          {/* PROFILE & ADDRESSES */}
+          {page === 'profile' && <ApiProfile />}
+
+          {/* CART & CHECKOUT (Customer only) */}
+          {page === 'cart' && !admin && !shop && !shipper && (
+            <Cart
+              products={products}
+              posts={posts}
+              cart={cart}
+              setCart={setCart}
+              money={money}
+              go={path => router.push(path)}
+            />
+          )}
+
+          {page === 'checkout' && !admin && !shop && !shipper && (
+            <ApiCheckout money={money} total={cartTotal} cart={cart} done={placeOrder} />
+          )}
+
+          {(page === 'cart' || page === 'checkout') && (admin || shop || shipper) && (
+            <div className="panel p-8 text-center">
+              <h2 className="text-base font-bold text-[#1f2d25]">Tài khoản {admin ? 'Admin' : shop ? 'Shop' : 'Shipper'} không sử dụng giỏ hàng</h2>
+              <p className="mt-1 text-xs text-slate-500">Chức năng giỏ hàng và đặt mua chỉ dành cho tài khoản Khách hàng.</p>
+            </div>
+          )}
+
+          {/* PRODUCT DETAIL */}
+          {detailId && detailProduct && (
+            <ProductDetail
+              product={detailProduct}
+              addCart={addCart}
+              money={money}
+              go={path => router.push(admin && isAdminRoute ? `/admin${path}` : path)}
+            />
+          )}
+
+          {/* ORDER DETAIL */}
+          {orderDetailId && detailOrder && (
+            <OrderDetailView
+              order={detailOrder}
+              statusTone={statusTone}
+              money={money}
+              admin={admin}
+              shop={shop}
+              updateStatus={changeOrderStatus}
+              notify={notify}
+              go={path => router.push(admin && isAdminRoute ? `/admin${path}` : shop ? '/shop/orders' : path)}
+            />
+          )}
+        </div>
+      </main>
+
+      {/* Bottom navigation for customers on phones: the main pages are one tap away */}
+      {!admin && !shop && !shipper && page !== 'chat' && page !== 'newfeed-create' && (
+        <nav aria-label="Điều hướng chính" className="fixed inset-x-0 bottom-0 z-40 border-t border-[#e3ebe5] bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+          <ul className="mx-auto grid max-w-lg grid-cols-5">
+            {[
+              { href: '/newfeed', label: 'Bảng tin', icon: faNewspaper, active: page === 'newfeed' },
+              { href: '/products', label: 'Sản phẩm', icon: faSeedling, active: page === 'products' || Boolean(detailId) },
+              { href: '/cart', label: 'Giỏ hàng', icon: faShoppingCart, active: page === 'cart' || page === 'checkout', badge: cartCount },
+              { href: '/orders', label: 'Đơn hàng', icon: faClipboardList, active: page === 'orders' || Boolean(detailOrder) },
+              { href: '/profile', label: 'Tôi', icon: faUser, active: ['profile', 'notifications', 'requests', 'help'].includes(page) },
+            ].map(item => (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  aria-current={item.active ? 'page' : undefined}
+                  className={`relative flex h-14 flex-col items-center justify-center gap-0.5 text-[10px] font-bold transition ${item.active ? 'text-[#176b52]' : 'text-[#8a9a90] hover:text-[#176b52]'}`}
+                >
+                  {item.active && <span aria-hidden className="absolute top-0 h-0.5 w-8 rounded-full bg-[#176b52]" />}
+                  <span className="relative">
+                    <FontAwesomeIcon icon={item.icon} className="text-base" />
+                    {item.badge ? (
+                      <span className="absolute -right-2.5 -top-1.5 min-w-[16px] rounded-full bg-rose-500 px-1 text-center text-[10px] font-extrabold leading-4 text-white">
+                        {item.badge > 99 ? '99+' : item.badge}
+                      </span>
+                    ) : null}
+                  </span>
+                  {item.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+
+      {/* Floating Chat Modal */}
+      <ChatModal
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        currentUser={currentUser}
+        conversations={conversations}
+        activePeerId={activePeerId}
+        messages={chatMessages}
+        onSelectPeer={handleSelectPeer}
+        onSendMessage={handleSendChatMessage}
+      />
+
+      {/* Review Modal */}
+      <ReviewModal
+        isOpen={reviewModalData.isOpen}
+        onClose={() => setReviewModalData(prev => ({ ...prev, isOpen: false }))}
+        type={reviewModalData.type}
+        targetId={reviewModalData.targetId}
+        targetTitle={reviewModalData.title}
+        onSubmit={handleSubmitReview}
+      />
+
+      {/* Product Editor Modal */}
+      {productEditorOpen && (
+        <ProductEditorModal
+          product={editingProduct}
+          categories={Array.from(
+            new Set([
+              ...(categories.length > 0 ? categoryOrder : ['Trái cây', 'Rau củ', 'Thực phẩm']),
+              ...products.map(p => p.category).filter(Boolean),
+            ])
+          )}
+          categoryLabels={categoryLabels}
+          onClose={() => {
+            setProductEditorOpen(false);
+            setEditingProduct(null);
+          }}
+          onSave={async (draft, existing) => {
+            const success = Boolean(await saveProduct(draft, existing));
+            if (success) {
+              setProductEditorOpen(false);
+              setEditingProduct(null);
+            }
+            return success;
+          }}
+        />
+      )}
+
+      {/* Categories: tree, create (with parent), rename / move, delete */}
+      {categoryModalOpen && (
+        <CategoryManagerModal
+          categories={categories}
+          onChange={setCategories}
+          onClose={() => setCategoryModalOpen(false)}
+          notify={notify}
+          productCounts={products.reduce<Record<string, number>>((acc, p) => ({ ...acc, [p.category]: (acc[p.category] || 0) + 1 }), {})}
+        />
+      )}
+
+      {/* Bulk: many new products / stock for many products */}
+      {bulkOpen && (
+        <BulkProductsModal
+          categories={categories}
+          products={shop && currentUser ? products.filter(p => p.shop_id === currentUser.id) : products}
+          initialTab={bulkOpen}
+          onClose={() => setBulkOpen(null)}
+          onCreated={created => {
+            setProducts(current => [
+              ...created.map(p => normalizeProduct({ ...p, category_name: categories.find(c => c.id === p.category_id)?.name || 'Chưa phân loại' })),
+              ...current,
+            ]);
+            setBulkOpen(null);
+            notify(`Đã thêm ${created.length} sản phẩm.`);
+          }}
+          onReceived={lines => {
+            setProducts(current => current.map(p => {
+              const line = lines.find(l => l.product_id === p.id);
+              return line ? { ...p, available: p.available + line.quantity } : p;
+            }));
+            setBulkOpen(null);
+            notify(`Đã nhập kho ${lines.length} mặt hàng.`);
+          }}
+        />
+      )}
+
+      {/* Product Request Modal */}
+      {modal === 'request' && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="request-modal-title" onClick={e => { if (e.target === e.currentTarget) setModal(''); }}>
+          <div className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl sm:p-6">
+            <div className="flex justify-between items-center pb-3 border-b border-[#edf2ee]">
+              <h3 id="request-modal-title" className="font-extrabold text-[#1a2d24] text-base">Gửi yêu cầu tìm nguồn nông sản</h3>
+              <button onClick={() => setModal('')} aria-label="Đóng" className="-mr-2 flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+            <form
+              onSubmit={async e => {
+                e.preventDefault();
+                if (!requestDraft.name.trim()) return;
+                setRequestBusy(true);
+                const fullDescription = `Danh mục: ${requestDraft.category || 'Nông sản'}; Số lượng: ${requestDraft.quantity || '1 phần'}${requestDraft.description.trim() ? `. ${requestDraft.description.trim()}` : ''}`;
+                try {
+                  if (apiState === 'live') {
+                    const created = await freshflow.createRequest<any>(requestDraft.name.trim(), fullDescription);
+                    setRequests(current => [normalizeRequest(created), ...current]);
+                  } else {
+                    setRequests(current => [
+                      normalizeRequest({
+                        id: Date.now(),
+                        product_name: requestDraft.name.trim(),
+                        description: fullDescription,
+                        status: 'OPEN',
+                        created_at: new Date().toISOString(),
+                      }),
+                      ...current,
+                    ]);
+                  }
+                  setRequestDraft({ name: '', category: 'Rau củ', quantity: '2 kg', description: '' });
+                  setModal('');
+                  notify('Đã gửi yêu cầu mặt hàng thành công!');
+                } catch (err: any) {
+                  notify(err?.message || 'Không thể gửi yêu cầu.');
+                } finally {
+                  setRequestBusy(false);
+                }
+              }}
+              className="mt-4 space-y-4"
+            >
+              <div>
+                <label className="text-xs font-bold text-[#3d5045]">Tên mặt hàng mong muốn *</label>
+                <input
+                  required
+                  minLength={2}
+                  maxLength={180}
+                  placeholder="Ví dụ: Dưa hấu ruột vàng, Măng tây xanh Đà Lạt..."
+                  value={requestDraft.name}
+                  onChange={e => setRequestDraft(d => ({ ...d, name: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-[#3d5045]">Danh mục nông sản</label>
+                  <select
+                    value={requestDraft.category}
+                    onChange={e => setRequestDraft(d => ({ ...d, category: e.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-[#d2ddd5] bg-white p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                  >
+                    {Array.from(new Set(['Rau củ', 'Trái cây', 'Thực phẩm', ...categories.map(c => c.name)])).map(cat => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-[#3d5045]">Số lượng dự kiến *</label>
+                  <input
+                    required
+                    placeholder="Ví dụ: 5 kg, 10 bó..."
+                    value={requestDraft.quantity}
+                    onChange={e => setRequestDraft(d => ({ ...d, quantity: e.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-[#3d5045]">Mô tả yêu cầu thêm (xuất xứ, thời gian nhận)</label>
+                <textarea
+                  rows={3}
+                  maxLength={2000}
+                  placeholder="Tiêu chuẩn VietGAP/hữu cơ, thời gian mong muốn nhận hàng..."
+                  value={requestDraft.description}
+                  onChange={e => setRequestDraft(d => ({ ...d, description: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setModal('')}
+                  className="rounded-xl border border-[#d2ddd5] px-4 py-2 text-xs font-semibold text-[#5c6e64]"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={requestBusy}
+                  className="rounded-xl bg-[#176b52] px-5 py-2 text-xs font-bold text-white shadow hover:bg-[#125340] disabled:opacity-50"
+                >
+                  {requestBusy ? 'Đang gửi…' : 'Gửi yêu cầu'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div role="status" className={`fixed inset-x-3 z-[70] flex items-center gap-3 rounded-2xl bg-[#1e2f26] px-4 py-3 text-xs font-semibold text-white shadow-2xl sm:inset-x-auto sm:right-6 sm:max-w-md ${!admin && !shop && !shipper && page !== 'chat' && page !== 'newfeed-create' ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] lg:bottom-6' : 'bottom-[max(0.75rem,env(safe-area-inset-bottom))] sm:bottom-6'}`}>
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white text-[10px]">
+            <FontAwesomeIcon icon={faCheck} />
+          </span>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}

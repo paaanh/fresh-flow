@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { freshflow, type AddressIn, type UserOut } from '@/lib/api';
 import { allocateOrderItems, type CatalogProduct } from '@/lib/order-payload';
+import UserAvatar from '@/components/user-avatar';
 
 type Address = AddressIn & { id: number };
 type Slot = { id: number; name: string; fee: string | number; start_time?: string; end_time?: string; is_active: boolean };
@@ -76,11 +77,18 @@ export function ApiProfile() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState('');
-  const [profileDraft, setProfileDraft] = useState({ full_name: '', phone: '', shop_name: '', shop_description: '', shop_address: '', vehicle_info: '' });
+  const [profileDraft, setProfileDraft] = useState({ full_name: '', phone: '', shop_name: '', shop_description: '', shop_address: '', vehicle_info: '', avatar_url: '' });
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const [draft, setDraft] = useState<AddressIn>({ label: 'Nhà', recipient: '', phone: '', line1: '', ward: '', district: '', city: '', is_default: false });
   const [verifyModal, setVerifyModal] = useState<{ target: string; purpose: string; demoCode: string; code: string } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
+  const [groupNames, setGroupNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    freshflow.customerGroups<{ code: string; name?: string }>()
+      .then(list => setGroupNames(Object.fromEntries(list.map(g => [g.code, g.name || g.code]))))
+      .catch(() => {});
+  }, []);
 
   const handleStartVerify = async (target: string, purpose: string) => {
     setBusy(true);
@@ -123,11 +131,33 @@ export function ApiProfile() {
     Promise.all([freshflow.me(), freshflow.addresses<Address>()]).then(([profile, list]) => {
       if (!alive) return;
       setUser(profile); setAddresses(list);
-      setProfileDraft({ full_name: profile.full_name, phone: profile.phone || '', shop_name: profile.shop_name || '', shop_description: profile.shop_description || '', shop_address: profile.shop_address || '', vehicle_info: profile.vehicle_info || '' });
+      setProfileDraft({ full_name: profile.full_name, phone: profile.phone || '', shop_name: profile.shop_name || '', shop_description: profile.shop_description || '', shop_address: profile.shop_address || '', vehicle_info: profile.vehicle_info || '', avatar_url: profile.avatar_url || '' });
       setDraft(current => ({ ...current, recipient: profile.full_name, phone: profile.phone || '' }));
     }).catch(error => { if (alive) setError(message(error)); });
     return () => { alive = false; };
   }, []);
+
+  async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setAvatarBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const updated = await freshflow.uploadAvatar(form);
+      setUser(updated);
+      setProfileDraft(current => ({ ...current, avatar_url: updated.avatar_url || '' }));
+      window.dispatchEvent(new CustomEvent('freshflow:profile_updated', { detail: updated }));
+      setSuccess('Đã cập nhật ảnh đại diện xác thực người mua!');
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setAvatarBusy(false);
+      event.target.value = '';
+    }
+  }
 
   async function saveProfile(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError(''); setSuccess('');
@@ -135,12 +165,14 @@ export function ApiProfile() {
       const updated = await freshflow.updateProfile({
         full_name: profileDraft.full_name.trim(),
         phone: profileDraft.phone.trim() || null,
+        avatar_url: profileDraft.avatar_url.trim() || null,
         ...(user?.role === 'SHOP' ? { shop_name: profileDraft.shop_name.trim(), shop_description: profileDraft.shop_description.trim(), shop_address: profileDraft.shop_address.trim() } : {}),
         ...(user?.role === 'SHIPPER' ? { vehicle_info: profileDraft.vehicle_info.trim() } : {}),
       });
       setUser(updated);
-      setProfileDraft(current => ({ ...current, full_name: updated.full_name, phone: updated.phone || '' }));
+      setProfileDraft(current => ({ ...current, full_name: updated.full_name, phone: updated.phone || '', avatar_url: updated.avatar_url || '' }));
       setDraft(current => ({ ...current, recipient: updated.full_name, phone: updated.phone || '' }));
+      window.dispatchEvent(new CustomEvent('freshflow:profile_updated', { detail: updated }));
       setSuccess('Đã cập nhật hồ sơ.');
     } catch (err) { setError(message(err)); }
     finally { setBusy(false); }
@@ -168,12 +200,42 @@ export function ApiProfile() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto w-full min-w-0 max-w-3xl space-y-5 sm:space-y-6">
       {user && (
-        <section className="panel p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-extrabold text-[#1a2d24]">{user.full_name}</h2>
+        <section className="panel overflow-hidden p-4 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex flex-col items-center gap-1.5">
+                <UserAvatar
+                  name={user.full_name}
+                  avatarUrl={user.avatar_url}
+                  size="xl"
+                  verified={Boolean(user.avatar_url)}
+                />
+                <label className="cursor-pointer rounded-lg border border-[#cfe0d5] bg-[#f4faf6] px-2.5 py-1 text-[10px] font-bold text-[#176b52] hover:bg-emerald-100 transition">
+                  {avatarBusy ? 'Đang tải…' : user.avatar_url ? 'Đổi ảnh Avatar' : '+ Tải ảnh xác thực'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={e => void handleAvatarUpload(e)}
+                    disabled={avatarBusy}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+              <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-extrabold text-[#1a2d24]">{user.full_name}</h2>
+                {user.avatar_url ? (
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                    ✓ Đã có ảnh xác thực người thật
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-800">
+                    Chưa có ảnh đại diện xác thực
+                  </span>
+                )}
+              </div>
               <div className="mt-1 flex flex-wrap items-center gap-2.5 text-xs text-[#7d8f85]">
                 <div className="flex items-center gap-1.5">
                   <span>{user.email}</span>
@@ -211,17 +273,18 @@ export function ApiProfile() {
                   ) : null}
                 </div>
               </div>
+              </div>
             </div>
             <span className="rounded-full bg-[#e8f5ec] px-3 py-1 text-xs font-bold text-[#176b52]">
-              Vai trò: {user.role === 'ADMIN' ? 'Quản trị viên' : user.role === 'SHOP' ? 'Cửa hàng (Shop)' : user.role === 'SHIPPER' ? 'Giao hàng (Shipper)' : 'Khách hàng'}
+              Vai trò: {user.role === 'ADMIN' ? 'Admin' : user.role === 'SHOP' ? 'Shop' : user.role === 'SHIPPER' ? 'Shipper' : 'Khách hàng'}
             </span>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-4 rounded-xl bg-[#f8faf8] p-4 text-xs">
+          <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl bg-[#f8faf8] p-3.5 text-xs sm:grid-cols-2 sm:gap-4 sm:p-4">
             {user.role === 'CUSTOMER' ? (
               <div>
                 <span className="text-[#819287]">Nhóm khách hàng:</span>
-                <div className="font-bold text-[#1e2d25]">{user.customer_group}</div>
+                <div className="font-bold text-[#1e2d25]">{groupNames[user.customer_group] || user.customer_group}</div>
               </div>
             ) : (
               <div>
@@ -248,6 +311,10 @@ export function ApiProfile() {
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-xs font-semibold text-slate-600">Họ và tên<input required minLength={2} maxLength={120} value={profileDraft.full_name} onChange={e => setProfileDraft({ ...profileDraft, full_name: e.target.value })} className={field} /></label>
               <label className="text-xs font-semibold text-slate-600">Số điện thoại<input maxLength={30} value={profileDraft.phone} onChange={e => setProfileDraft({ ...profileDraft, phone: e.target.value })} className={field} /></label>
+              <label className="text-xs font-semibold text-slate-600 sm:col-span-2">
+                Link ảnh đại diện (Avatar xác thực người mua thật)
+                <input maxLength={500} placeholder="https://... hoặc tải ảnh trực tiếp bằng nút bên trên" value={profileDraft.avatar_url} onChange={e => setProfileDraft({ ...profileDraft, avatar_url: e.target.value })} className={field} />
+              </label>
               {user.role === 'SHOP' && <>
                 <label className="text-xs font-semibold text-slate-600">Tên cửa hàng<input maxLength={150} value={profileDraft.shop_name} onChange={e => setProfileDraft({ ...profileDraft, shop_name: e.target.value })} className={field} /></label>
                 <label className="text-xs font-semibold text-slate-600">Địa chỉ cửa hàng<input maxLength={255} value={profileDraft.shop_address} onChange={e => setProfileDraft({ ...profileDraft, shop_address: e.target.value })} className={field} /></label>
@@ -261,19 +328,19 @@ export function ApiProfile() {
       )}
 
       {user?.role === 'CUSTOMER' && (
-        <section className="panel p-6 space-y-4">
+        <section className="panel space-y-4 overflow-hidden p-4 sm:p-6">
           <h3 className="text-sm font-extrabold text-[#1a2d24]">Sổ địa chỉ nhận hàng</h3>
 
           <div className="space-y-3">
             {addresses.map(a => (
-              <div key={a.id} className="flex items-center justify-between rounded-xl border border-[#e8ede8] p-3.5 text-xs">
-                <div>
+              <div key={a.id} className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-[#e8ede8] p-3.5 text-xs sm:flex-nowrap sm:items-center">
+                <div className="min-w-0 flex-1">
                   <div className="font-bold text-[#1e2d25]">
                     {a.label} {a.is_default && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-[#176b52]">Mặc định</span>}
                   </div>
-                  <div className="mt-0.5 text-[#5e7065]">{addressText(a)} · {a.recipient} ({a.phone})</div>
+                  <div className="mt-0.5 break-words text-[#5e7065]">{addressText(a)} · {a.recipient} ({a.phone})</div>
                 </div>
-                <button onClick={() => removeAddress(a.id)} className="text-xs text-rose-600 hover:underline">Xóa</button>
+                <button onClick={() => removeAddress(a.id)} aria-label={`Xóa địa chỉ ${a.label}`} className="-mr-2 -mt-1 shrink-0 rounded-lg px-2.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50">Xóa</button>
               </div>
             ))}
             {addresses.length === 0 && <p className="text-xs text-[#809187]">Bạn chưa lưu địa chỉ nào.</p>}
@@ -281,16 +348,16 @@ export function ApiProfile() {
 
           <form onSubmit={addAddress} className="mt-4 border-t border-[#f0f4f1] pt-4 space-y-3">
             <h4 className="text-xs font-bold text-[#3d5045]">Thêm địa chỉ mới</h4>
-            <div className="grid grid-cols-2 gap-3">
-              <input required placeholder="Tên gợi nhớ (Nhà, Cơ quan...)" value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} className={field} />
-              <input required placeholder="Người nhận" value={draft.recipient} onChange={e => setDraft({ ...draft, recipient: e.target.value })} className={field} />
-              <input required placeholder="Số điện thoại" value={draft.phone} onChange={e => setDraft({ ...draft, phone: e.target.value })} className={field} />
-              <input required placeholder="Số nhà, đường" value={draft.line1} onChange={e => setDraft({ ...draft, line1: e.target.value })} className={field} />
-              <input placeholder="Phường/Xã" value={draft.ward} onChange={e => setDraft({ ...draft, ward: e.target.value })} className={field} />
-              <input placeholder="Quận/Huyện" value={draft.district} onChange={e => setDraft({ ...draft, district: e.target.value })} className={field} />
-              <input required placeholder="Tỉnh/Thành phố" value={draft.city} onChange={e => setDraft({ ...draft, city: e.target.value })} className={field} />
-              <label className="flex items-center gap-2 text-xs text-[#526359] self-center">
-                <input type="checkbox" checked={draft.is_default} onChange={e => setDraft({ ...draft, is_default: e.target.checked })} />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="block text-[11px] font-semibold text-[#526359]">Tên gợi nhớ<input required placeholder="Nhà, Cơ quan, KTX…" value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} className={`mt-1 ${field}`} /></label>
+              <label className="block text-[11px] font-semibold text-[#526359]">Người nhận<input required autoComplete="name" value={draft.recipient} onChange={e => setDraft({ ...draft, recipient: e.target.value })} className={`mt-1 ${field}`} /></label>
+              <label className="block text-[11px] font-semibold text-[#526359]">Số điện thoại<input required type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} onChange={e => setDraft({ ...draft, phone: e.target.value })} className={`mt-1 ${field}`} /></label>
+              <label className="block text-[11px] font-semibold text-[#526359]">Số nhà, đường<input required autoComplete="address-line1" value={draft.line1} onChange={e => setDraft({ ...draft, line1: e.target.value })} className={`mt-1 ${field}`} /></label>
+              <label className="block text-[11px] font-semibold text-[#526359]">Phường/Xã<input value={draft.ward} onChange={e => setDraft({ ...draft, ward: e.target.value })} className={`mt-1 ${field}`} /></label>
+              <label className="block text-[11px] font-semibold text-[#526359]">Quận/Huyện<input value={draft.district} onChange={e => setDraft({ ...draft, district: e.target.value })} className={`mt-1 ${field}`} /></label>
+              <label className="block text-[11px] font-semibold text-[#526359]">Tỉnh/Thành phố<input required autoComplete="address-level1" value={draft.city} onChange={e => setDraft({ ...draft, city: e.target.value })} className={`mt-1 ${field}`} /></label>
+              <label className="flex cursor-pointer items-center gap-2.5 self-center py-2 text-xs text-[#526359]">
+                <input type="checkbox" checked={draft.is_default} onChange={e => setDraft({ ...draft, is_default: e.target.checked })} className="h-5 w-5 accent-[#176b52]" />
                 Đặt làm mặc định
               </label>
             </div>
@@ -358,7 +425,7 @@ export function ApiProfile() {
 }
 
 export function ApiCheckout({ money, total, cart, done }: {
-  money: (value: number) => string; total: number; cart: Record<number, number>;
+  money: (value: number) => string; total: number; cart: Record<string, number>;
   done: (details: CheckoutDetails) => Promise<boolean>;
 }) {
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -408,6 +475,16 @@ export function ApiCheckout({ money, total, cart, done }: {
     }).catch(err => { if (alive) setError(message(err)); });
     return () => { alive = false; };
   }, [cart]);
+
+  if (Object.keys(cart).length === 0) {
+    return (
+      <div className="panel mx-auto max-w-lg p-10 text-center">
+        <h2 className="font-bold text-[#1f2d25]">Chưa có gì để thanh toán</h2>
+        <p className="mt-2 text-xs text-slate-500">Giỏ hàng đang trống. Thêm sản phẩm rồi quay lại để đặt đơn nhé.</p>
+        <Link href="/products" className="mt-5 inline-flex rounded-xl bg-[#176b52] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#125340]">Xem sản phẩm</Link>
+      </div>
+    );
+  }
 
   return (
     <form
@@ -487,13 +564,14 @@ export function ApiCheckout({ money, total, cart, done }: {
       {/* Delivery slot selection */}
       {slots.length > 0 && (
         <div className="space-y-2 rounded-xl bg-[#f9fbf9] p-4 border border-[#e8ede8]">
-          <label className="block text-xs font-bold text-[#3d5045]">Khung giờ giao hàng</label>
+          <label htmlFor="checkout-slot" className="block text-xs font-bold text-[#3d5045]">Khung giờ giao hàng</label>
           <select
+            id="checkout-slot"
             className={field}
             value={slotId || ''}
             onChange={event => setSlotId(Number(event.target.value))}
           >
-            <option value="">Chọn khung giờ (mặc định)...</option>
+            <option value="">Sớm nhất có thể (cửa hàng sắp xếp)</option>
             {slots.map(s => (
               <option key={s.id} value={s.id}>
                 {s.name}{s.start_time ? ` (${s.start_time} - ${s.end_time || ''})` : ''}{Number(s.fee) > 0 ? ` - Phí: ${money(Number(s.fee))}` : ''}
@@ -506,7 +584,7 @@ export function ApiCheckout({ money, total, cart, done }: {
       {/* Payment method */}
       <div>
         <label className="block text-xs font-bold text-[#3d5045] mb-1.5">Phương thức thanh toán</label>
-        <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="grid grid-cols-1 gap-2 text-xs min-[420px]:grid-cols-3">
           {[
             { id: 'COD', label: 'Tiền mặt khi nhận (COD)' },
             { id: 'BANK_TRANSFER', label: 'Chuyển khoản QR' },

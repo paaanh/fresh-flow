@@ -1,9 +1,17 @@
 import '../styles/globals.css';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 
 export const metadata: Metadata = {
   title: 'FreshFlow — Quản lý đặt hàng & tồn kho',
   description: 'Nền tảng đặt hàng và quản lý phân phối hàng hóa theo ngày.',
+};
+
+// resizes-content: on Android Chrome the layout viewport shrinks when the virtual keyboard opens,
+// so dvh-based layouts such as the chat keep the input visible.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  interactiveWidget: 'resizes-content',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

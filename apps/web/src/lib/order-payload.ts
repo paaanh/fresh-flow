@@ -1,4 +1,5 @@
 import type { OrderCreateIn } from './api';
+import { parseCartKey } from './cart';
 
 type CatalogBatch = {
   id: number; is_open: boolean; available_quantity?: number | string;
@@ -6,27 +7,33 @@ type CatalogBatch = {
 };
 export type CatalogProduct = { id: number; batches?: CatalogBatch[]; inventory_batches?: CatalogBatch[] };
 
-/** The documented customer catalog must expose real batch IDs before checkout can submit. */
-export function allocateOrderItems(catalog: CatalogProduct[], cart: Record<number, number>): OrderCreateIn['items'] {
+/**
+ * Turns the cart into order lines with real batch IDs. Lines bought through a Newfeed post carry
+ * post_id so the backend charges that post's price and checks its quantity limit. Several lines
+ * of the same product (shop + post) may share a batch.
+ */
+export function allocateOrderItems(catalog: CatalogProduct[], cart: Record<string, number>): OrderCreateIn['items'] {
   const items: OrderCreateIn['items'] = [];
-  const used = new Set<number>();
-  for (const [productId, requested] of Object.entries(cart)) {
+  const left = new Map<number, number>();
+  for (const [key, requested] of Object.entries(cart)) {
+    const { productId, postId } = parseCartKey(key);
     if (!Number.isFinite(requested) || requested <= 0) throw new Error('Số lượng đặt hàng phải lớn hơn 0.');
-    const product = catalog.find(item => Number(item.id) === Number(productId));
+    const product = catalog.find(item => Number(item.id) === productId);
     if (!product) throw new Error('Sản phẩm không còn trong catalog. Vui lòng tải lại giỏ hàng.');
     let remaining = requested;
     for (const batch of product.batches ?? product.inventory_batches ?? []) {
       const id = Number(batch.id);
-      if (batch.is_open !== true || !Number.isSafeInteger(id) || id <= 0 || used.has(id)) continue;
-      const available = Number(batch.available_quantity ?? (Number(batch.initial_quantity) - Number(batch.approved_quantity)));
+      if (batch.is_open !== true || !Number.isSafeInteger(id) || id <= 0) continue;
+      if (!left.has(id)) left.set(id, Number(batch.available_quantity ?? (Number(batch.initial_quantity) - Number(batch.approved_quantity))));
+      const available = left.get(id)!;
       if (!Number.isFinite(available) || available <= 0) continue;
-      const quantity = Math.min(remaining, available);
-      items.push({ batch_id: id, quantity });
-      used.add(id);
-      remaining = Math.max(0, remaining - quantity);
+      const quantity = Math.round(Math.min(remaining, available) * 1000) / 1000;
+      items.push(postId ? { batch_id: id, quantity, post_id: postId } : { batch_id: id, quantity });
+      left.set(id, available - quantity);
+      remaining = Math.max(0, Math.round((remaining - quantity) * 1000) / 1000);
       if (remaining < 0.000001) break;
     }
-    if (remaining >= 0.000001) throw new Error('Catalog chưa cung cấp đủ lô hàng khả dụng (batch_id). Cần backend bổ sung dữ liệu lô hàng cho khách.');
+    if (remaining >= 0.000001) throw new Error('Không đủ hàng khả dụng cho một mặt hàng trong giỏ. Vui lòng giảm số lượng.');
   }
   if (!items.length) throw new Error('Giỏ hàng đang trống.');
   return items;

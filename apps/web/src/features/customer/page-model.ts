@@ -16,7 +16,7 @@ export const money = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + '
 
 export function normalizeProduct(raw: any): Product {
   const category = typeof raw.category === 'string' ? raw.category : raw.category?.name || raw.category_name || 'Rau củ';
-  return {
+  const prod: Product = {
     id: Number(raw.id),
     name: raw.name || raw.product_name || 'Sản phẩm',
     description: raw.description || '',
@@ -33,7 +33,60 @@ export function normalizeProduct(raw: any): Product {
     tag: raw.tag,
     shop_id: raw.shop_id,
     shop_name: raw.shop_name,
+    base_price: raw.base_price != null ? Number(raw.base_price) : undefined,
+    customer_price: raw.customer_price != null ? Number(raw.customer_price) : undefined,
+    list_price: raw.list_price != null ? Number(raw.list_price) : raw.base_price != null ? Number(raw.base_price) : undefined,
+    sale_price: raw.sale_price != null ? Number(raw.sale_price) : null,
+    sale_start_at: raw.sale_start_at || null,
+    sale_end_at: raw.sale_end_at || null,
+    sale_status: raw.sale_status || 'NONE',
+    stock: raw.stock_quantity != null ? Number(raw.stock_quantity) : undefined,
+    reserved: raw.reserved_quantity != null ? Number(raw.reserved_quantity) : undefined,
   };
+
+  // If there is an active sale and sale_price is lower than price, use sale_price
+  if (prod.sale_status === 'ACTIVE' && prod.sale_price != null && prod.sale_price > 0 && prod.sale_price < prod.price) {
+    if (!prod.list_price || prod.list_price <= prod.sale_price) {
+      prod.list_price = prod.price;
+    }
+    prod.price = prod.sale_price;
+  }
+
+  return prod;
+}
+
+/**
+ * Price display for a product (customer grid, product page, cart, shop cards).
+ * - effectivePrice: what the viewer pays (customer_price from the API = MIN(group price, running Sale)).
+ * - originalPrice: the product's own standard price (giá gốc / base_price) — the same reference for
+ *   buyers and sellers, so a Sale set by the shop shows struck through on both sides. The viewer's
+ *   group price is not used as reference: when a group discount happens to equal the Sale price the
+ *   buyer would otherwise see no Sale at all.
+ * - isSale: the shop has a Sale running and the viewer pays less than the standard price.
+ */
+export function getProductPricing(product: Pick<Product, 'sale_status' | 'list_price' | 'base_price' | 'price' | 'sale_price'>) {
+  const effectivePrice = Number(product.price || 0);
+  const base = Number(product.base_price || 0) > 0 ? Number(product.base_price) : Number(product.list_price || 0) > 0 ? Number(product.list_price) : effectivePrice;
+  const saleRunning = product.sale_status === 'ACTIVE' && product.sale_price != null && Number(product.sale_price) > 0;
+  const isSale = saleRunning && effectivePrice > 0 && effectivePrice < base;
+  return {
+    isSale,
+    originalPrice: base,
+    effectivePrice,
+    discountPercent: isSale ? Math.round((1 - effectivePrice / base) * 100) : 0,
+  };
+}
+
+/** % the customer's group pays below the standard price when no Sale is running (0 = none). */
+export function groupDiscountPercent(product: Pick<Product, 'sale_status' | 'list_price' | 'base_price' | 'price' | 'sale_price'>) {
+  const { isSale, originalPrice, effectivePrice } = getProductPricing(product);
+  if (isSale || !(originalPrice > 0) || !(effectivePrice > 0) || effectivePrice >= originalPrice) return 0;
+  return Math.round((1 - effectivePrice / originalPrice) * 100);
+}
+
+/** Product has an active Sale and the customer price is below the list price. */
+export function isOnSale(product: Pick<Product, 'sale_status' | 'list_price' | 'base_price' | 'price' | 'sale_price'>) {
+  return getProductPricing(product).isSale;
 }
 
 export function normalizeOrder(raw: any): Order {
@@ -52,14 +105,18 @@ export function normalizeOrder(raw: any): Order {
     CANCELLED: 'Đã hủy',
   };
   const status = raw.status || 'PENDING';
+  // Number of different products (quantities can be 1,25 kg + 3 nải: adding them up means nothing)
   const itemCount = Array.isArray(raw.items)
-    ? raw.items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0)
+    ? new Set(raw.items.map((item: any) => item.product_id ?? item.batch_id ?? item.id)).size
     : Number(raw.item_count || 0);
 
   return {
     apiId: Number(raw.id),
     id: String(raw.order_number || raw.code || raw.id || '—'),
     customer: raw.customer_name || raw.customer?.full_name || raw.user?.full_name || 'Khách hàng',
+    customer_avatar_url: raw.customer_avatar_url || null,
+    customer_group: raw.customer_group || null,
+    customer_is_verified: Boolean(raw.customer_is_verified),
     date: raw.created_at
       ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(raw.created_at))
       : raw.date || 'Mới tạo',
@@ -90,7 +147,9 @@ export function normalizeOrder(raw: any): Order {
     shipper_name: raw.shipper_name,
     shipper_phone: raw.shipper_phone,
     shipper_vehicle: raw.shipper_vehicle,
+    shipper_avatar_url: raw.shipper_avatar_url || null,
     note: raw.note,
+    inventory_state: raw.inventory_state || 'NONE',
   };
 }
 
@@ -244,6 +303,12 @@ export function normalizeRequest(raw: any): ProductRequest {
     description: desc,
     admin_response: raw.admin_response || '',
     quoted_price: raw.quoted_price != null ? Number(raw.quoted_price) : null,
+    product_id: raw.product_id ?? null,
+    linked_product_name: raw.linked_product_name ?? null,
+    linked_product_available: raw.linked_product_available != null ? Number(raw.linked_product_available) : null,
+    handled_by_name: raw.handled_by_name ?? null,
+    customer_phone: raw.customer_phone ?? null,
+    updated_at: raw.updated_at ?? null,
   };
 }
 
@@ -262,47 +327,50 @@ export const toApiOrderStatus = (status: string) =>
   }[status] || status);
 
 export const adminSections = [
-  { label: 'TỔNG QUAN', links: [{ name: 'Tổng quan & Tài chính', href: '/admin/dashboard', icon: faChartLine }, { name: 'Bảng tin Newfeed', href: '/newfeed', icon: faNewspaper }] },
-  { label: 'QUẢNG BÁ & BÁN HÀNG', links: [{ name: 'Sản phẩm & Tồn kho', href: '/admin/products', icon: faAppleWhole }, { name: 'Quản lý Đơn hàng', href: '/admin/orders', icon: faClipboardList }] },
-  { label: 'VẬN HÀNH & ĐỐI TÁC', links: [{ name: 'Giao hàng & Shipper', href: '/admin/deliveries', icon: faTruck }, { name: 'Khách hàng & Nhóm', href: '/admin/customers', icon: faUsers }, { name: 'Yêu cầu mặt hàng', href: '/admin/requests', icon: faMessage }] },
-  { label: 'QUẢN TRỊ NÂNG CAO', links: [{ name: 'Báo cáo & Đối soát', href: '/admin/reports', icon: faChartLine }, { name: 'Kiểm duyệt nội dung', href: '/admin/moderation', icon: faSliders }, { name: 'Thông báo', href: '/admin/notifications', icon: faBell }, { name: 'Cài đặt hệ thống', href: '/admin/settings', icon: faGear }] },
+  { label: 'TỔNG QUAN', links: [{ name: 'Tổng quan', href: '/admin/dashboard', icon: faChartLine }, { name: 'Bảng tin', href: '/newfeed', icon: faNewspaper }] },
+  { label: 'BÁN HÀNG', links: [{ name: 'Sản phẩm', href: '/admin/products', icon: faAppleWhole }, { name: 'Đơn hàng', href: '/admin/orders', icon: faClipboardList }] },
+  { label: 'VẬN HÀNH', links: [{ name: 'Giao hàng', href: '/admin/deliveries', icon: faTruck }, { name: 'Người dùng', href: '/admin/customers', icon: faUsers }, { name: 'Yêu cầu hàng', href: '/admin/requests', icon: faMessage }] },
+  { label: 'HỆ THỐNG', links: [{ name: 'Báo cáo', href: '/admin/reports', icon: faChartLine }, { name: 'Kiểm duyệt', href: '/admin/moderation', icon: faSliders }, { name: 'Thông báo', href: '/admin/notifications', icon: faBell }, { name: 'Cài đặt', href: '/admin/settings', icon: faGear }] },
 ];
 
 export const shopSections = [
-  { label: 'CỬA HÀNG CỦA BẠN', links: [{ name: 'Shop Portal', href: '/shop', icon: faStore }, { name: 'Bảng tin Newfeed', href: '/newfeed', icon: faNewspaper }] },
-  { label: 'SẢN PHẨM & ĐƠN HÀNG', links: [{ name: 'Sản phẩm của Shop', href: '/shop/products', icon: faAppleWhole }, { name: 'Đơn hàng phát sinh', href: '/shop/orders', icon: faClipboardList }, { name: 'Yêu cầu mặt hàng', href: '/requests', icon: faMessage }, { name: 'Đánh giá & Review', href: '/shop/reviews', icon: faStar }] },
-  { label: 'TƯƠNG TÁC', links: [{ name: 'Tin nhắn với khách', href: '/chat', icon: faComments }, { name: 'Thông báo Shop', href: '/notifications', icon: faBell }] },
+  { label: 'CỬA HÀNG', links: [{ name: 'Tổng quan', href: '/shop', icon: faStore }, { name: 'Bảng tin', href: '/newfeed', icon: faNewspaper }] },
+  { label: 'BÁN HÀNG', links: [{ name: 'Sản phẩm', href: '/shop/products', icon: faAppleWhole }, { name: 'Đơn hàng', href: '/shop/orders', icon: faClipboardList }, { name: 'Nhóm & Khách hàng', href: '/shop/groups', icon: faUsers }, { name: 'Yêu cầu hàng', href: '/requests', icon: faMessage }, { name: 'Đánh giá', href: '/shop/reviews', icon: faStar }] },
+  { label: 'TƯƠNG TÁC', links: [{ name: 'Tin nhắn', href: '/chat', icon: faComments }, { name: 'Thông báo', href: '/notifications', icon: faBell }] },
 ];
 
 export const customerSections = [
-  { label: 'KHÁM PHÁ & MUA SẮM', links: [{ name: 'Bảng tin Newfeed', href: '/newfeed', icon: faNewspaper }, { name: 'Cửa hàng nông sản', href: '/products', icon: faAppleWhole }, { name: 'Đơn hàng của tôi', href: '/orders', icon: faClipboardList }] },
-  { label: 'TIỆN ÍCH', links: [{ name: 'Yêu cầu mặt hàng', href: '/requests', icon: faMessage }, { name: 'Hồ sơ & Địa chỉ', href: '/profile', icon: faUser }, { name: 'Thông báo', href: '/notifications', icon: faBell }, { name: 'Trợ giúp', href: '/help', icon: faCircleQuestion }] },
+  { label: 'MUA SẮM', links: [{ name: 'Bảng tin', href: '/newfeed', icon: faNewspaper }, { name: 'Sản phẩm', href: '/products', icon: faAppleWhole }, { name: 'Đơn hàng', href: '/orders', icon: faClipboardList }] },
+  { label: 'TIỆN ÍCH', links: [{ name: 'Yêu cầu hàng', href: '/requests', icon: faMessage }, { name: 'Hồ sơ', href: '/profile', icon: faUser }, { name: 'Thông báo', href: '/notifications', icon: faBell }, { name: 'Trợ giúp', href: '/help', icon: faCircleQuestion }] },
 ];
 
 export const shipperSections = [
-  { label: 'VẬN CHUYỂN & GIAO HÀNG', links: [{ name: 'Shipper Portal', href: '/shipper', icon: faMotorcycle }, { name: 'Lịch sử giao hàng', href: '/shipper/history', icon: faClipboardList }] },
-  { label: 'CÁ NHÂN', links: [{ name: 'Hồ sơ phương tiện', href: '/profile', icon: faUser }, { name: 'Thông báo', href: '/notifications', icon: faBell }] },
+  { label: 'GIAO HÀNG', links: [{ name: 'Nhận đơn', href: '/shipper', icon: faMotorcycle }, { name: 'Lịch sử', href: '/shipper/history', icon: faClipboardList }] },
+  { label: 'CÁ NHÂN', links: [{ name: 'Hồ sơ', href: '/profile', icon: faUser }, { name: 'Thông báo', href: '/notifications', icon: faBell }] },
 ];
 
 export const titleMap: Record<string, string> = {
-  dashboard: 'Tổng quan & Tài chính',
-  newfeed: 'Bảng tin Newfeed',
-  orders: 'Quản lý Đơn hàng',
-  products: 'Sản phẩm tươi',
-  inventory: 'Quản lý tồn kho',
-  deliveries: 'Điều phối giao hàng',
-  customers: 'Khách hàng & Nhóm',
-  requests: 'Yêu cầu mặt hàng',
-  reports: 'Báo cáo & Đối soát tài chính',
-  moderation: 'Kiểm duyệt nội dung',
-  pricing: 'Giá theo nhóm khách hàng',
-  settings: 'Cài đặt hệ thống',
+  dashboard: 'Tổng quan',
+  newfeed: 'Bảng tin',
+  orders: 'Đơn hàng',
+  products: 'Sản phẩm',
+  inventory: 'Tồn kho',
+  deliveries: 'Giao hàng',
+  customers: 'Người dùng',
+  requests: 'Yêu cầu hàng',
+  reports: 'Báo cáo',
+  moderation: 'Kiểm duyệt',
+  pricing: 'Bảng giá nhóm',
+  settings: 'Cài đặt',
   notifications: 'Thông báo',
-  profile: 'Hồ sơ & Địa chỉ nhận hàng',
-  help: 'Trung tâm trợ giúp',
+  profile: 'Hồ sơ',
+  help: 'Trợ giúp',
   cart: 'Giỏ hàng',
-  checkout: 'Xác nhận đơn hàng & Thuế VAT',
-  shop: 'Shop Portal',
-  shipper: 'Shipper Portal',
-  chat: 'Trò chuyện Realtime',
+  checkout: 'Thanh toán',
+  shop: 'Kênh Shop',
+  groups: 'Nhóm & Khách hàng',
+  reviews: 'Đánh giá',
+  history: 'Lịch sử giao hàng',
+  shipper: 'Kênh Shipper',
+  chat: 'Tin nhắn',
 };

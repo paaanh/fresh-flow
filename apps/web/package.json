@@ -2,7 +2,34 @@
   "name": "freshflow-web",
   "version": "1.0.0",
   "private": true,
-  "scripts": { "dev": "next dev", "build": "next build", "start": "next start", "typecheck": "tsc --noEmit", "test:api": "node tests/check-integration.cjs", "test:e2e": "node ../../tests/e2e/e2e_runner.mjs" },
-  "dependencies": { "@fortawesome/fontawesome-svg-core": "^6.7.2", "@fortawesome/free-solid-svg-icons": "^6.7.2", "@fortawesome/react-fontawesome": "^0.2.2", "next": "^14.2.25", "react": "^18.3.1", "react-dom": "^18.3.1" },
-  "devDependencies": { "@types/node": "^22.13.4", "@types/react": "^18.3.18", "@types/react-dom": "^18.3.5", "autoprefixer": "^10.4.20", "postcss": "^8.5.3", "tailwindcss": "^3.4.17", "typescript": "^5.7.3" }
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test:api": "node tests/check-integration.cjs",
+    "test:e2e": "node ../../tests/e2e/e2e_runner.mjs",
+    "postinstall": "node scripts/copy-tinymce.cjs"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^6.7.2",
+    "@fortawesome/free-solid-svg-icons": "^6.7.2",
+    "@fortawesome/react-fontawesome": "^0.2.2",
+    "@tinymce/tinymce-react": "^5.1.1",
+    "dompurify": "^3.4.17",
+    "next": "^14.2.25",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "read-excel-file": "^5.8.8",
+    "tinymce": "^7.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3"
+  }
 }

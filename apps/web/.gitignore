@@ -4,3 +4,6 @@ out/
 .env*
 !.env.example
 *.tsbuildinfo
+
+# self-hosted TinyMCE (copied by scripts/copy-tinymce.cjs)
+public/tinymce/

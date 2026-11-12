@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
+  faArrowLeft,
   faComments,
   faPaperPlane,
   faSearch,
@@ -14,6 +15,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import type { ChatMessage, ChatUser, Conversation, User } from '@/types/domain';
 import ChatUserPicker from '@/components/chat-user-picker';
+import UserAvatar from '@/components/user-avatar';
 
 interface ChatViewProps {
   currentUser?: User;
@@ -42,7 +44,9 @@ export default function ChatView({
   const [selectedPeer, setSelectedPeer] = useState<number | undefined>(
     activePeerId || conversations[0]?.peer_id
   );
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  // Phones show either the conversation list or the open thread.
+  const [mobilePane, setMobilePane] = useState<'list' | 'thread'>(activePeerId ? 'thread' : 'list');
 
   useEffect(() => {
     setLocalConversations(conversations);
@@ -57,9 +61,11 @@ export default function ChatView({
     }
   }, [activePeerId, localConversations, onSelectPeer, selectedPeer]);
 
+  // Scroll only the message pane (scrollIntoView would also scroll the page on mobile).
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, selectedPeer, mobilePane]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,6 +91,7 @@ export default function ChatView({
       setLocalConversations(prev => [newEntry, ...prev]);
     }
     setSelectedPeer(user.id);
+    setMobilePane('thread');
     onSelectPeer(user.id);
     if (onNewConversation) onNewConversation(user);
   };
@@ -105,11 +112,11 @@ export default function ChatView({
   const getRoleBadge = (role?: string) => {
     switch (role) {
       case 'ADMIN':
-        return { label: 'Quản trị viên', bg: 'bg-rose-50 text-rose-700 border-rose-200' };
+        return { label: 'Admin', bg: 'bg-rose-50 text-rose-700 border-rose-200' };
       case 'SHOP':
-        return { label: 'Cửa hàng (Shop)', bg: 'bg-emerald-50 text-[#176b52] border-emerald-200' };
+        return { label: 'Shop', bg: 'bg-emerald-50 text-[#176b52] border-emerald-200' };
       case 'SHIPPER':
-        return { label: 'Shipper giao hàng', bg: 'bg-blue-50 text-blue-700 border-blue-200' };
+        return { label: 'Shipper', bg: 'bg-blue-50 text-blue-700 border-blue-200' };
       case 'CUSTOMER':
       default:
         return { label: 'Khách hàng', bg: 'bg-slate-50 text-slate-700 border-slate-200' };
@@ -131,9 +138,9 @@ export default function ChatView({
   };
 
   return (
-    <div className="flex h-[720px] w-full overflow-hidden rounded-2xl border border-[#e8ede8] bg-white shadow-sm">
+    <div className="flex h-[calc(100dvh-7.5rem)] min-h-[260px] w-full overflow-hidden rounded-2xl border border-[#e8ede8] bg-white shadow-sm sm:h-[calc(100dvh-12rem)] lg:h-[min(720px,calc(100dvh-11rem))]">
       {/* SIDEBAR: CONTACTS LIST */}
-      <div className="flex w-80 flex-col border-r border-[#e8ede8] bg-[#f8faf8]">
+      <div className={`${mobilePane === 'thread' ? 'hidden' : 'flex'} w-full min-w-0 flex-col border-r border-[#e8ede8] bg-[#f8faf8] md:flex md:w-72 lg:w-80`}>
         {/* Header with Title and Add User Button */}
         <div className="p-4 border-b border-[#e8ede8] space-y-3">
           <div className="flex items-center justify-between">
@@ -147,7 +154,7 @@ export default function ChatView({
               title="Bắt đầu trò chuyện mới hoặc chọn người nhắn tin"
             >
               <FontAwesomeIcon icon={faUserPlus} className="text-xs" />
-              <span>Chọn người</span>
+              <span>Mới</span>
             </button>
           </div>
 
@@ -155,11 +162,11 @@ export default function ChatView({
           <div className="relative">
             <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-2.5 text-xs text-[#8d9e93]" />
             <input
-              type="text"
+              type="search"
               placeholder="Tìm kiếm người nhắn..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="w-full rounded-xl border border-[#d2ddd5] py-1.5 pl-8 pr-3 text-xs focus:border-[#176b52] focus:outline-none"
+              className="w-full rounded-xl border border-[#d2ddd5] py-1.5 pl-8 pr-3 text-base focus:border-[#176b52] focus:outline-none sm:text-xs"
             />
           </div>
 
@@ -196,18 +203,28 @@ export default function ChatView({
                 key={c.peer_id}
                 onClick={() => {
                   setSelectedPeer(c.peer_id);
+                  setMobilePane('thread');
                   onSelectPeer(c.peer_id);
                 }}
                 className={`w-full text-left p-3.5 transition flex items-start gap-3 ${
                   isSelected ? 'bg-white shadow-sm font-semibold border-l-4 border-l-[#176b52]' : 'hover:bg-white/70'
                 }`}
               >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#e3f0e8] text-[#176b52] font-bold text-xs mt-0.5">
-                  <FontAwesomeIcon icon={icon} />
-                </div>
+                {c.avatar_url ? (
+                  <UserAvatar name={c.peer_name} avatarUrl={c.avatar_url} size="md" verified className="mt-0.5" />
+                ) : (
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#e3f0e8] text-[#176b52] font-bold text-xs mt-0.5">
+                    <FontAwesomeIcon icon={icon} />
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center gap-1">
-                    <span className="text-xs font-bold text-[#1f2d25] truncate">{c.peer_name}</span>
+                  <div className="flex items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-xs font-bold text-[#1f2d25] truncate">{c.peer_name}</span>
+                      <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none ${meta.bg}`}>
+                        {meta.label}
+                      </span>
+                    </div>
                     {c.last_time && (
                       <span className="text-[10px] text-slate-400 shrink-0">
                         {new Date(c.last_time).toLocaleTimeString('vi-VN', {
@@ -217,18 +234,13 @@ export default function ChatView({
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                  <div className="flex items-center justify-between gap-1 mt-1">
                     <span className="text-[11px] text-[#7d8f85] truncate">{c.last_message}</span>
                     {c.unread > 0 && (
-                      <span className="shrink-0 rounded-full bg-rose-500 px-1.5 py-0.2 text-[9px] font-bold text-white">
+                      <span className="shrink-0 rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">
                         {c.unread}
                       </span>
                     )}
-                  </div>
-                  <div className="mt-1">
-                    <span className={`inline-block rounded border px-1.5 py-0.2 text-[9px] font-medium ${meta.bg}`}>
-                      {meta.label}
-                    </span>
                   </div>
                 </div>
               </button>
@@ -250,43 +262,58 @@ export default function ChatView({
       </div>
 
       {/* MAIN CHAT AREA */}
-      <div className="flex flex-1 flex-col bg-white">
+      <div className={`${mobilePane === 'list' ? 'hidden' : 'flex'} min-w-0 flex-1 flex-col bg-white md:flex`}>
         {selectedPeer && currentContact ? (
           <>
             {/* Active Contact Header */}
-            <div className="p-4 border-b border-[#e8ede8] flex items-center justify-between bg-white">
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#e3f0e8] text-[#176b52] font-bold">
-                  <FontAwesomeIcon icon={getRoleIcon(currentContact.peer_role)} />
-                </div>
-                <div>
-                  <div className="text-sm font-extrabold text-[#1e2e26]">
-                    {currentContact.peer_name}
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#e8ede8] bg-white p-2.5 sm:p-4">
+              <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMobilePane('list')}
+                  aria-label="Quay lại danh sách hội thoại"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[#176b52] hover:bg-slate-50 md:hidden"
+                >
+                  <FontAwesomeIcon icon={faArrowLeft} />
+                </button>
+                {currentContact.avatar_url ? (
+                  <UserAvatar name={currentContact.peer_name} avatarUrl={currentContact.avatar_url} size="md" verified />
+                ) : (
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#e3f0e8] text-[#176b52] font-bold">
+                    <FontAwesomeIcon icon={getRoleIcon(currentContact.peer_role)} />
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5">
+                )}
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm font-extrabold text-[#1e2e26]">
+                      {currentContact.peer_name}
+                    </span>
                     <span
-                      className={`inline-block rounded border px-2 py-0.2 text-[10px] font-bold ${
+                      className={`inline-block rounded border px-2 py-0.5 text-[10px] font-bold leading-none ${
                         getRoleBadge(currentContact.peer_role).bg
                       }`}
                     >
                       {getRoleBadge(currentContact.peer_role).label}
                     </span>
-                    <span className="text-[11px] text-[#7e8f85]">· Đang hoạt động trên FreshFlow</span>
+                  </div>
+                  <div className="mt-0.5 hidden text-[11px] text-[#7e8f85] sm:block">
+                    Đang hoạt động trên FreshFlow
                   </div>
                 </div>
               </div>
 
               <button
                 onClick={() => setIsPickerOpen(true)}
-                className="rounded-xl border border-[#d2ddd5] px-3 py-1.5 text-xs font-bold text-[#4c5f53] hover:bg-slate-50 flex items-center gap-1.5"
+                aria-label="Đổi người nhắn tin"
+                className="flex shrink-0 items-center gap-1.5 rounded-xl border border-[#d2ddd5] px-2.5 py-1.5 text-xs font-bold text-[#4c5f53] hover:bg-slate-50"
               >
                 <FontAwesomeIcon icon={faUserPlus} className="text-xs text-[#176b52]" />
-                Đổi người nhắn tin
+                <span className="hidden sm:inline">Đổi người nhắn tin</span>
               </button>
             </div>
 
             {/* Messages Thread */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#fbfdfb]">
+            <div ref={threadRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-[#fbfdfb] p-3 sm:p-4">
               {messages.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center p-6 text-xs text-[#809187]">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#e8f2ec] text-[#176b52] text-xl mb-2">
@@ -310,7 +337,7 @@ export default function ChatView({
                         })}
                       </div>
                       <div
-                        className={`max-w-[75%] rounded-2xl p-3.5 text-xs leading-relaxed ${
+                        className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl p-3 text-[13px] leading-relaxed sm:max-w-[75%] sm:p-3.5 sm:text-xs ${
                           isMe
                             ? 'bg-[#176b52] text-white rounded-br-none shadow-sm'
                             : 'bg-[#edf3ef] text-[#1c2c23] rounded-bl-none border border-[#e1e9e3]'
@@ -329,23 +356,33 @@ export default function ChatView({
                   );
                 })
               )}
-              <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input Box */}
-            <form onSubmit={handleSend} className="p-3.5 border-t border-[#e8ede8] bg-white flex items-center gap-2">
+            {/* Message Input Box (16px text on phones so iOS does not zoom when focusing) */}
+            <form onSubmit={handleSend} className="flex shrink-0 items-center gap-2 border-t border-[#e8ede8] bg-white p-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] sm:p-3.5">
               <input
                 type="text"
-                placeholder="Nhập nội dung tin nhắn gửi đi..."
+                placeholder="Nhập tin nhắn…"
+                aria-label="Nội dung tin nhắn"
+                enterKeyHint="send"
+                autoComplete="off"
                 value={inputText}
                 onChange={e => setInputText(e.target.value)}
-                className="flex-1 rounded-xl border border-[#d2ddd5] p-2.5 text-xs focus:border-[#176b52] focus:outline-none"
-                autoFocus
+                onFocus={e => {
+                  const field = e.currentTarget;
+                  // After the virtual keyboard opens, keep the input and the latest messages visible.
+                  setTimeout(() => {
+                    if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
+                    field.scrollIntoView({ block: "nearest" });
+                  }, 300);
+                }}
+                className="min-w-0 flex-1 rounded-xl border border-[#d2ddd5] px-3 py-2.5 text-base focus:border-[#176b52] focus:outline-none sm:text-xs"
               />
               <button
                 type="submit"
+                aria-label="Gửi tin nhắn"
                 disabled={!inputText.trim()}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#176b52] text-white shadow hover:bg-[#125340] disabled:opacity-40 transition"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#176b52] text-white shadow transition hover:bg-[#125340] disabled:opacity-40 sm:h-10 sm:w-10"
               >
                 <FontAwesomeIcon icon={faPaperPlane} className="text-xs" />
               </button>

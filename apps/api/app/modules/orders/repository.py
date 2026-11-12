@@ -34,7 +34,7 @@ def list_orders(
     elif user.role == "SHOP":
         query = query.where(Order.shop_id == user.id)
     elif user.role == "SHIPPER":
-        query = query.where(or_(Order.shipper_id == user.id, Order.status.in_(["READY_FOR_PICKUP", "PICKED_UP", "DELIVERING"])))
+        query = query.where(or_(Order.shipper_id == user.id, (Order.shipper_id.is_(None)) & (Order.status == "READY_FOR_PICKUP")))
 
     if status:
         query = query.where(Order.status == status)
@@ -67,6 +67,9 @@ def enrich_order_names(db: Session, order: Order):
     if order.user_id:
         cust = db.get(User, order.user_id)
         order.customer_name = cust.full_name if cust else None
+        order.customer_avatar_url = cust.avatar_url if cust else None
+        order.customer_group = cust.customer_group if cust else None
+        order.customer_is_verified = bool(cust and (cust.is_email_verified or cust.is_phone_verified))
     if order.shop_id:
         shop = db.get(User, order.shop_id)
         order.shop_name = shop.shop_name or shop.full_name if shop else None
@@ -75,6 +78,7 @@ def enrich_order_names(db: Session, order: Order):
         order.shipper_name = shipper.full_name if shipper else None
         order.shipper_phone = shipper.phone if shipper else None
         order.shipper_vehicle = shipper.vehicle_info if shipper else None
+        order.shipper_avatar_url = shipper.avatar_url if shipper else None
 
 
 def get_order_history(db: Session, order_id: int):

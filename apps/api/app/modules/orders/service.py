@@ -1,17 +1,18 @@
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from datetime import datetime, timezone
 from uuid import uuid4
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.audit import write_audit
 from app.core.notifications import add_notification
-from app.models import Order, OrderItem, OrderStatusHistory, User, VatConfig
-from app.schemas import OrderCreateIn, OrderStatusIn, ShipperAssignIn, OrderPaymentIn
+from app.models import InventoryBatch, Order, OrderItem, OrderStatusHistory, User, VatConfig
+from app.schemas import OrderCreateIn, OrderStatusIn, ShipperAssignIn, OrderPaymentIn, ShortageResolutionIn
 from app.modules.orders import repository
 from app.modules.inventory import service as inventory_service
 from app.modules.pricing.service import unit_price as get_unit_price
+from app.modules.posts import pricing as post_pricing
 from app.realtime import event, manager
 
 
@@ -81,8 +82,12 @@ async def create_order(db: Session, payload: OrderCreateIn, user: User) -> Order
         if product.shop_id and not detected_shop_id:
             detected_shop_id = product.shop_id
 
-        line_unit_price = get_unit_price(db, product, user.customer_group)
-        line_total = (line.quantity * line_unit_price).quantize(Decimal("0.01"))
+        if line.post_id:
+            # Giá theo chương trình của bài + giữ hạn mức mở bán của bài (nguyên tử)
+            line_unit_price, _ = post_pricing.price_for_order_line(db, line.post_id, product, line.quantity, user)
+        else:
+            line_unit_price = get_unit_price(db, product, user.customer_group)
+        line_total = (line.quantity * line_unit_price).quantize(Decimal("1"), rounding=ROUND_HALF_UP)  # whole dong (decimal quantities)
         subtotal += line_total
 
         line_items.append(
@@ -94,12 +99,13 @@ async def create_order(db: Session, payload: OrderCreateIn, user: User) -> Order
                 quantity=line.quantity,
                 unit_price=line_unit_price,
                 line_total=line_total,
+                post_id=line.post_id,
             )
         )
 
     # Financial calculation
     vat_rate = get_current_vat_rate(db)
-    vat_amount = (subtotal * vat_rate).quantize(Decimal("0.01"))
+    vat_amount = (subtotal * vat_rate).quantize(Decimal("1"), rounding=ROUND_HALF_UP)  # VND has no fractions
     discount = Decimal("0")
     total = (subtotal + vat_amount + fee - discount).quantize(Decimal("0.01"))
 
@@ -301,29 +307,22 @@ async def change_order_status(
     if old_status in {"CANCELLED", "REJECTED"} and new_status != old_status:
         raise HTTPException(409, "Đơn hàng đã hủy hoặc bị từ chối, không thể đổi trạng thái")
 
-    RESERVED_STATUSES = {"CONFIRMED", "PREPARING", "READY_FOR_PICKUP", "PICKED_UP", "DELIVERING", "COMPLETED"}
-
-    # Inventory quantity management
-    if old_status == "PENDING" and new_status in RESERVED_STATUSES:
-        demand: dict[int, Decimal] = {}
-        for item in order.items:
-            demand[item.batch_id] = demand.get(item.batch_id, Decimal("0")) + item.quantity
-        inventory_service.approve_quantities(db, demand)
-
-    if new_status in {"CANCELLED", "REJECTED"} and old_status in RESERVED_STATUSES:
-        demand: dict[int, Decimal] = {}
-        for item in order.items:
-            demand[item.batch_id] = demand.get(item.batch_id, Decimal("0")) + item.quantity
-        inventory_service.release_quantities(db, demand)
+    apply_inventory_transition(db, order, new_status)
+    if new_status in {"CANCELLED", "REJECTED"}:
         order.debt_amount = Decimal("0")
+        if old_status not in {"CANCELLED", "REJECTED"}:
+            for item in order.items:
+                post_pricing.release_quota(db, item.post_id, item.product_id, item.quantity)
 
     # When completed, ensure payment status is updated if it was COD
     if new_status == "COMPLETED":
-        if order.payment_method == "COD" and order.payment_status in {"UNPAID", "DEBT"}:
+        # COD: khách trả nốt phần còn nợ khi nhận hàng (giữ nguyên phần đã trả trước)
+        if order.payment_method == "COD" and order.payment_status not in {"PAID", "PREPAID"}:
+            outstanding = max(Decimal("0"), order.total - order.paid_amount)
             order.paid_amount = order.total
             order.debt_amount = Decimal("0")
             order.payment_status = "PAID"
-            order.cash_collected_by_shipper = order.total
+            order.cash_collected_by_shipper = (order.cash_collected_by_shipper or Decimal("0")) + outstanding
 
     order.status = new_status
     order.updated_at = datetime.now(timezone.utc)
@@ -441,8 +440,12 @@ async def assign_shipper_to_order(
         raise HTTPException(403, "Shipper không thể tự phân công đơn hàng")
 
     shipper = db.get(User, payload.shipper_id)
-    if not shipper or shipper.role != "SHIPPER":
-        raise HTTPException(422, "Người dùng này không phải là Shipper")
+    if not shipper or shipper.role != "SHIPPER" or not shipper.is_active:
+        raise HTTPException(422, "Người dùng này không phải là Shipper đang hoạt động")
+    if order.status == "PENDING":
+        raise HTTPException(409, "Cần xác nhận đơn (giữ hàng trong kho) trước khi phân công Shipper")
+    if order.status not in {"CONFIRMED", "PREPARING", "READY_FOR_PICKUP"}:
+        raise HTTPException(409, "Đơn hàng đã được lấy/giao hoặc đã hủy, không thể phân công lại Shipper")
 
     old_status = order.status
     order.shipper_id = shipper.id
@@ -463,7 +466,8 @@ async def assign_shipper_to_order(
         db,
         shipper.id,
         "Bạn có đơn hàng mới cần giao!",
-        f"Đơn {order.order_number} đã được phân công cho bạn. Điểm giao: {order.delivery_address}",
+        f"Đơn {order.order_number} ({len(order.items)} mặt hàng, {'thu COD ' + format(order.debt_amount, ',.0f') + 'đ' if order.payment_method == 'COD' else 'đã thanh toán'}) đã được phân công cho bạn. "
+        f"Người nhận: {order.recipient_name} {order.recipient_phone}. Điểm giao: {order.delivery_address or 'Điểm giao tập trung'}",
         "order.assigned",
         link="/shipper",
     )
@@ -479,7 +483,8 @@ async def assign_shipper_to_order(
     db.commit()
     db.refresh(order)
     repository.enrich_order_names(db, order)
-    await manager.send_user(shipper.id, event("order.assigned", {"order_id": order.id, "order_number": order.order_number, "status": order.status}))
+    await manager.send_user(shipper.id, event("order.assigned", {"order_id": order.id, "order_number": order.order_number, "status": order.status, "shipper_id": shipper.id}))
+    await manager.send_user(shipper.id, event("notification.created", {"event_type": "order.assigned", "order_id": order.id}))
     await manager.send_user(order.user_id, event("order.status_changed", {"order_id": order.id, "order_number": order.order_number, "status": order.status}))
     if order.shop_id:
         await manager.send_user(order.shop_id, event("notification.created", {"event_type": "order.assigned", "order_id": order.id}))
@@ -514,7 +519,7 @@ def update_order_payment(
     order.paid_amount = payload.paid_amount
     order.debt_amount = max(Decimal("0"), order.total - payload.paid_amount)
     order.payment_status = payload.payment_status
-    if payload.cash_collected > Decimal("0"):
+    if payload.cash_collected > Decimal("0") or operator.role == "SHIPPER":
         order.cash_collected_by_shipper = payload.cash_collected
 
     write_audit(
@@ -530,3 +535,231 @@ def update_order_payment(
     db.refresh(order)
     repository.enrich_order_names(db, order)
     return order
+
+
+# ---------------------------------------------------------------------------
+# Inventory lifecycle: NONE -> RESERVED (xác nhận) -> SHIPPED (xuất kho)
+#                      RESERVED -> RELEASED (hủy đơn, hoàn trả giữ chỗ)
+# ---------------------------------------------------------------------------
+RESERVING_STATUSES = {"CONFIRMED", "PREPARING", "READY_FOR_PICKUP", "PICKED_UP", "DELIVERING", "COMPLETED"}
+SHIPPING_STATUSES = {"PICKED_UP", "DELIVERING", "COMPLETED"}
+TERMINATING_STATUSES = {"CANCELLED", "REJECTED"}
+
+
+def _claim_inventory_state(db: Session, order_id: int, from_state: str, to_state: str) -> bool:
+    """Compare-and-set on orders.inventory_state so concurrent requests on the same
+    order (double click, admin + shop at once) can only apply a transition once."""
+    result = db.execute(
+        update(Order)
+        .where(Order.id == order_id, Order.inventory_state == from_state)
+        .values(inventory_state=to_state)
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1
+
+
+def _batch_demand(order: Order) -> dict[int, Decimal]:
+    demand: dict[int, Decimal] = {}
+    for item in order.items:
+        demand[item.batch_id] = demand.get(item.batch_id, Decimal("0")) + item.quantity
+    return demand
+
+
+def _reserve_order_items(db: Session, order: Order) -> None:
+    """Reserve stock for every line. A line may be served from several open batches
+    of the same product (FIFO); it is split into several order lines in that case.
+    Raises 409 and reserves nothing when the total available stock is insufficient."""
+    plan: list[tuple[OrderItem, list[tuple[int, Decimal]]]] = []
+    shortages: list[str] = []
+    for item in sorted(order.items, key=lambda line: (line.product_id, line.batch_id)):
+        remaining = item.quantity
+        allocations: list[tuple[int, Decimal]] = []
+        candidate_ids = [item.batch_id] + list(
+            db.scalars(
+                select(InventoryBatch.id)
+                .where(
+                    InventoryBatch.product_id == item.product_id,
+                    InventoryBatch.is_open.is_(True),
+                    InventoryBatch.id != item.batch_id,
+                )
+                .order_by(InventoryBatch.batch_date, InventoryBatch.id)
+            ).all()
+        )
+        for batch_id in candidate_ids:
+            if remaining <= 0:
+                break
+            batch = db.get(InventoryBatch, batch_id, populate_existing=True)
+            if not batch or not batch.is_open:
+                continue
+            take = min(batch.available_quantity, remaining)
+            if take <= 0:
+                continue
+            if inventory_service.try_reserve(db, batch_id, take):
+                allocations.append((batch_id, take))
+                remaining -= take
+        if remaining > 0:
+            shortages.append(item.product_name_snapshot)
+        plan.append((item, allocations))
+
+    if shortages:
+        db.rollback()
+        raise HTTPException(
+            409,
+            "Không đủ tồn kho khả dụng để xác nhận đơn ("
+            + ", ".join(sorted(set(shortages)))
+            + "). Hãy chọn phương án xử lý: giao một phần, chờ nhập thêm hàng hoặc báo hết hàng.",
+        )
+
+    for item, allocations in plan:
+        first_batch, first_qty = allocations[0]
+        extra_total = Decimal("0")
+        for batch_id, qty in allocations[1:]:
+            line_total = (qty * item.unit_price).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            extra_total += line_total
+            order.items.append(
+                OrderItem(
+                    product_id=item.product_id,
+                    batch_id=batch_id,
+                    product_name_snapshot=item.product_name_snapshot,
+                    unit_snapshot=item.unit_snapshot,
+                    quantity=qty,
+                    unit_price=item.unit_price,
+                    line_total=line_total,
+                    post_id=item.post_id,
+                )
+            )
+        item.batch_id = first_batch
+        item.quantity = first_qty
+        item.line_total = item.line_total - extra_total
+    db.flush()
+
+
+def apply_inventory_transition(db: Session, order: Order, new_status: str) -> None:
+    state = order.inventory_state or "NONE"
+    if new_status in RESERVING_STATUSES and state == "NONE":
+        if not _claim_inventory_state(db, order.id, "NONE", "RESERVED"):
+            raise HTTPException(409, "Đơn hàng đang được xử lý giữ hàng bởi thao tác khác, vui lòng tải lại")
+        _reserve_order_items(db, order)
+        state = "RESERVED"
+    if new_status in SHIPPING_STATUSES and state == "RESERVED":
+        if _claim_inventory_state(db, order.id, "RESERVED", "SHIPPED"):
+            inventory_service.ship_quantities(db, _batch_demand(order))
+    elif new_status in TERMINATING_STATUSES and state == "RESERVED":
+        if _claim_inventory_state(db, order.id, "RESERVED", "RELEASED"):
+            inventory_service.release_quantities(db, _batch_demand(order))
+    elif new_status in TERMINATING_STATUSES and state == "SHIPPED" and order.status != "COMPLETED":
+        # Hủy khi hàng đang trên đường (đã lấy/đang giao): hàng được hoàn về kho.
+        # Đơn đã giao thành công thì hàng đã ở chỗ khách, không tự cộng lại tồn.
+        if _claim_inventory_state(db, order.id, "SHIPPED", "RETURNED"):
+            inventory_service.restock_quantities(db, _batch_demand(order))
+    db.flush()
+    db.refresh(order)
+
+
+def _recalculate_totals(order: Order) -> None:
+    subtotal = sum((item.line_total for item in order.items), Decimal("0"))
+    order.subtotal = subtotal
+    order.vat_amount = (subtotal * order.vat_rate).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    order.total = (subtotal + order.vat_amount + order.delivery_fee - order.discount_amount).quantize(Decimal("0.01"))
+    order.debt_amount = max(Decimal("0"), order.total - order.paid_amount)
+
+
+def _require_order_manager(order: Order, operator: User) -> None:
+    if operator.role not in {"ADMIN", "SHOP"}:
+        raise HTTPException(403, "Bạn không có quyền xử lý tồn kho của đơn hàng")
+    if operator.role == "SHOP" and order.shop_id != operator.id:
+        raise HTTPException(403, "Đơn hàng này thuộc về Shop khác")
+
+
+def stock_check(db: Session, order_id: int, operator: User) -> dict:
+    order = repository.get_order(db, order_id)
+    if not order:
+        raise HTTPException(404, "Không tìm thấy đơn hàng")
+    _require_order_manager(order, operator)
+
+    requested: dict[int, Decimal] = {}
+    names: dict[int, tuple[str, str]] = {}
+    for item in order.items:
+        requested[item.product_id] = requested.get(item.product_id, Decimal("0")) + item.quantity
+        names[item.product_id] = (item.product_name_snapshot, item.unit_snapshot)
+
+    needs_reservation = (order.inventory_state or "NONE") == "NONE"
+    lines = []
+    for product_id, qty in requested.items():
+        available = inventory_service.available_quantity(db, product_id)
+        competing = db.execute(
+            select(Order.id, Order.order_number, Order.created_at, OrderItem.quantity)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .where(Order.status == "PENDING", Order.id != order.id, OrderItem.product_id == product_id)
+            .order_by(Order.created_at)
+        ).all()
+        lines.append({
+            "product_id": product_id,
+            "product_name": names[product_id][0],
+            "unit": names[product_id][1],
+            "requested_quantity": qty,
+            "available_quantity": available,
+            "shortage_quantity": max(Decimal("0"), qty - available) if needs_reservation else Decimal("0"),
+            "competing_pending_orders": [
+                {"order_id": oid, "order_number": num, "created_at": created, "quantity": q}
+                for oid, num, created, q in competing
+            ],
+        })
+    return {
+        "order_id": order.id,
+        "order_number": order.order_number,
+        "status": order.status,
+        "inventory_state": order.inventory_state,
+        "can_fulfill": all(line["shortage_quantity"] <= 0 for line in lines),
+        "lines": lines,
+    }
+
+
+async def resolve_shortage(db: Session, order_id: int, payload: ShortageResolutionIn, operator: User) -> Order:
+    order = repository.get_order(db, order_id, lock=True)
+    if not order:
+        raise HTTPException(404, "Không tìm thấy đơn hàng")
+    _require_order_manager(order, operator)
+    if order.status != "PENDING" or (order.inventory_state or "NONE") != "NONE":
+        raise HTTPException(409, "Chỉ xử lý thiếu hàng cho đơn đang chờ xác nhận")
+
+    if payload.action == "OUT_OF_STOCK":
+        note = payload.note or "Rất tiếc, mặt hàng trong đơn đã hết. Đơn hàng được hủy và không phát sinh chi phí."
+        return await change_order_status(db, order.id, OrderStatusIn(status="CANCELLED", note=note), operator)
+
+    if payload.action == "WAIT":
+        note = payload.note or "Đơn hàng đang chờ nhập thêm hàng, chúng tôi sẽ xác nhận ngay khi đủ hàng."
+        db.add(OrderStatusHistory(order_id=order.id, changed_by=operator.id, old_status="PENDING", new_status="PENDING", note=f"[Chờ nhập hàng] {note}"))
+        add_notification(db, order.user_id, f"Đơn {order.order_number} đang chờ nhập thêm hàng", note, "order.status_changed", link=f"/orders/{order.order_number}")
+        write_audit(db, operator.id, "order.backorder", "order", str(order.id), note)
+        db.commit()
+        db.refresh(order)
+        repository.enrich_order_names(db, order)
+        await manager.send_user(order.user_id, event("notification.created", {"event_type": "order.status_changed", "order_id": order.id}))
+        return order
+
+    # PARTIAL: giảm số lượng từng dòng về mức còn khả dụng (theo thứ tự dòng) rồi xác nhận đơn
+    available: dict[int, Decimal] = {}
+    adjustments: list[str] = []
+    for item in list(order.items):
+        if item.product_id not in available:
+            available[item.product_id] = inventory_service.available_quantity(db, item.product_id)
+        take = min(item.quantity, available[item.product_id])
+        if take < item.quantity:
+            adjustments.append(f"{item.product_name_snapshot}: {item.quantity.normalize():f} -> {take.normalize():f} {item.unit_snapshot}")
+        available[item.product_id] -= take
+        post_pricing.release_quota(db, item.post_id, item.product_id, item.quantity - take)
+        if take <= 0:
+            order.items.remove(item)
+        else:
+            item.quantity = take
+            item.line_total = (take * item.unit_price).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    if not order.items:
+        db.rollback()
+        raise HTTPException(409, "Không còn mặt hàng nào khả dụng để giao một phần. Hãy chọn 'Báo hết hàng' hoặc 'Chờ nhập hàng'.")
+    _recalculate_totals(order)
+    db.flush()
+    if adjustments:
+        add_notification(db, order.user_id, f"Đơn {order.order_number} được giao một phần", "Do thiếu hàng, số lượng đã điều chỉnh: " + "; ".join(adjustments), "order.status_changed", link=f"/orders/{order.order_number}")
+    note = payload.note or ("Giao một phần do thiếu hàng: " + "; ".join(adjustments) if adjustments else "Xác nhận đơn")
+    return await change_order_status(db, order.id, OrderStatusIn(status="CONFIRMED", note=note[:1000]), operator)

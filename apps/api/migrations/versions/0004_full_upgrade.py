@@ -262,7 +262,9 @@ def upgrade():
             op.add_column("categories", sa.Column("parent_id", sa.Integer(),
                           sa.ForeignKey("categories.id"), nullable=True))
     if "description" not in cats:
-        op.add_column("categories", sa.Column("description", sa.Text(), nullable=True, server_default=""))
+        # MySQL rejects DEFAULT on TEXT columns (error 1101): add, then backfill
+        op.add_column("categories", sa.Column("description", sa.Text(), nullable=True))
+        op.execute("UPDATE categories SET description = '' WHERE description IS NULL")
     if "icon" not in cats:
         op.add_column("categories", sa.Column("icon", sa.String(100),
                       nullable=False, server_default=""))
@@ -277,9 +279,13 @@ def upgrade():
                           sa.ForeignKey("users.id"), nullable=True))
         op.create_index("ix_products_shop_id", "products", ["shop_id"])
     if "images" not in prods:
-        op.add_column("products", sa.Column("images", sa.Text(), nullable=True, server_default=""))
+        # MySQL rejects DEFAULT on TEXT columns (error 1101): add, then backfill
+        op.add_column("products", sa.Column("images", sa.Text(), nullable=True))
+        op.execute("UPDATE products SET images = '' WHERE images IS NULL")
     if "attached_services" not in prods:
-        op.add_column("products", sa.Column("attached_services", sa.Text(), nullable=True, server_default=""))
+        # MySQL rejects DEFAULT on TEXT columns (error 1101): add, then backfill
+        op.add_column("products", sa.Column("attached_services", sa.Text(), nullable=True))
+        op.execute("UPDATE products SET attached_services = '' WHERE attached_services IS NULL")
 
     # orders — new financial & delivery columns
     ords = _existing_cols(bind, "orders")

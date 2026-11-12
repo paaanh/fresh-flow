@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user, require_admin, require_admin_or_shop
 from app.models import User
-from app.schemas import CategoryIn, ProductIn, ProductOut, ProductUpdateIn
+from app.schemas import BulkProductsIn, CategoryIn, CategoryUpdateIn, ProductIn, ProductOut, ProductUpdateIn
 from app.modules.catalog import service
 
 router = APIRouter()
@@ -42,6 +42,21 @@ def list_categories(db: Session = Depends(get_db)):
 @router.post("/admin/categories", status_code=201)
 def create_category(payload: CategoryIn, db: Session = Depends(get_db), admin: User = Depends(require_admin_or_shop)):
     return service.create_category(db, payload, admin)
+
+
+@router.patch("/admin/categories/{category_id}")
+def update_category(category_id: int, payload: CategoryUpdateIn, db: Session = Depends(get_db), admin: User = Depends(require_admin_or_shop)):
+    return service.update_category(db, category_id, payload, admin)
+
+
+@router.delete("/admin/categories/{category_id}")
+def delete_category(category_id: int, db: Session = Depends(get_db), admin: User = Depends(require_admin_or_shop)):
+    return service.delete_category(db, category_id, admin)
+
+
+@router.post("/admin/products/bulk", response_model=list[ProductOut], status_code=201)
+def create_products_bulk(payload: BulkProductsIn, db: Session = Depends(get_db), operator: User = Depends(require_admin_or_shop)):
+    return service.create_products_bulk(db, payload, operator)
 
 
 @router.get("/products", response_model=list[ProductOut])

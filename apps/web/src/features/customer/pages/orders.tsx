@@ -6,6 +6,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faClockRotateLeft, faEllipsis, faMotorcycle, faPhone, faReply, faStar } from '@fortawesome/free-solid-svg-icons';
 import OrderItems from '@/components/order-items';
 import OrderStatusControl, { type UpdateOrderStatus } from '@/components/order-status-control';
+import UserAvatar from '@/components/user-avatar';
 import { Badge } from './shared-ui';
 import { freshflow } from '@/lib/api';
 import { getOrderVisualMeta, sortOrdersByPriority } from '@/features/customer/page-model';
@@ -172,8 +173,38 @@ export function OrderDetailView({
           </div>
 
           {(admin || shop) && (
-            <div className="mt-4">
-              <OrderStatusControl id={order.id} status={order.status} updateStatus={updateStatus} />
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e4e9e4] bg-[#f8fbf9] p-3.5">
+              <div className="flex items-center gap-3">
+                <UserAvatar
+                  name={order.customer}
+                  avatarUrl={order.customer_avatar_url}
+                  size="md"
+                  verified={Boolean(order.customer_avatar_url)}
+                />
+                <div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-[#1f2d25]">
+                    <span>{order.customer}</span>
+                    {order.customer_group && (
+                      <span className="rounded-full bg-[#e8f5ec] px-2 py-0.5 text-[10px] font-bold text-[#176b52]">
+                        {order.customer_group}
+                      </span>
+                    )}
+                    {order.customer_avatar_url ? (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                        ✓ Có ảnh xác thực người thật
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                        Chưa có avatar xác thực
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-[#6d7c73]">
+                    {order.customer_is_verified ? 'Tài khoản đã xác thực OTP' : 'Chưa xác thực OTP'}
+                  </p>
+                </div>
+              </div>
+              <OrderStatusControl id={order.id} apiId={order.apiId} status={order.status} updateStatus={updateStatus} onNotify={notify} />
             </div>
           )}
 
@@ -547,7 +578,107 @@ export function OrderTable({
   const adminPrefix = pathname.startsWith('/admin') ? '/admin' : '';
   const sortedOrders = sortOrdersByPriority(orders);
   return (
-    <div className="overflow-auto">
+    <>
+      {/* Mobile Card List (< md): no horizontal table scrolling needed */}
+      <div className="divide-y divide-[#eef2ee] md:hidden">
+        {sortedOrders.map(o => {
+          const canCancel = !admin && updateStatus && (o.status === 'Chờ xác nhận' || o.status === 'Chờ duyệt');
+          const visual = getOrderVisualMeta(o.status);
+          return (
+            <div
+              key={`mob-${o.id}`}
+              className={`border-l-4 p-3.5 transition ${visual.border} ${visual.muted ? `${visual.rowBg} opacity-75` : visual.rowBg}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => router.push(`${adminPrefix}/orders/${encodeURIComponent(o.id)}`)}
+                  className="text-left"
+                >
+                  <div className="text-sm font-extrabold text-[#176b52] hover:underline">{o.id}</div>
+                  <div className="mt-0.5 text-[10px] text-slate-400">{o.delivery} · {o.date}</div>
+                </button>
+                <span className={`shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${visual.badge}`}>
+                  {o.status}
+                </span>
+              </div>
+
+              <div className="mt-2.5 flex items-center justify-between gap-2">
+                {!admin ? (
+                  <div className="min-w-0 text-xs text-[#33463c]">
+                    <div className="truncate font-semibold">
+                      {(o.lines || []).slice(0, 2).map(l => `${l.name} ×${l.quantity}`).join(', ') || o.items}
+                      {(o.lines || []).length > 2 ? ` +${(o.lines || []).length - 2} món` : ''}
+                    </div>
+                    <div className="text-[10px] text-slate-400">{o.items}</div>
+                  </div>
+                ) : (
+                <div className="flex min-w-0 items-center gap-2">
+                  <UserAvatar
+                    name={o.customer}
+                    avatarUrl={o.customer_avatar_url}
+                    size="xs"
+                    verified={Boolean(o.customer_avatar_url)}
+                  />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1 text-xs font-semibold text-[#1f2d25]">
+                      <span className="truncate">{o.customer}</span>
+                      {o.customer_group && (
+                        <span className="rounded bg-[#e8f5ec] px-1.5 py-0.5 text-[10px] font-bold text-[#176b52]">
+                          {o.customer_group}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-400">{o.items}</div>
+                  </div>
+                </div>
+                )}
+                <div className={`shrink-0 text-sm font-extrabold ${visual.muted ? 'text-slate-500' : 'text-[#176b52]'}`}>
+                  {money(o.total)}
+                </div>
+              </div>
+
+              {o.shipper_name && (
+                <div className="mt-2 inline-flex items-center gap-1 rounded bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                  <FontAwesomeIcon icon={faMotorcycle} className="text-[10px]" />
+                  <span>Shipper: {o.shipper_name} {o.shipper_phone ? `(${o.shipper_phone})` : ''}</span>
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                {admin && updateStatus && (
+                  <div className="w-full sm:w-auto">
+                    <OrderStatusControl id={o.id} apiId={o.apiId} status={o.status} updateStatus={updateStatus} />
+                  </div>
+                )}
+                {canCancel && (
+                  <button
+                    type="button"
+                    onClick={() => void updateStatus(o.id, 'Đã hủy', 'Khách hàng hủy đơn khi chờ xác nhận')}
+                    className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-bold text-rose-700"
+                  >
+                    Hủy đơn
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => router.push(`${adminPrefix}/orders/${encodeURIComponent(o.id)}`)}
+                  className="flex items-center gap-1 rounded-lg border border-[#dce4de] bg-white px-3 py-1.5 text-[11px] font-bold text-[#176b52]"
+                >
+                  <span>Chi tiết</span>
+                  <FontAwesomeIcon icon={faEllipsis} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {sortedOrders.length === 0 && (
+          <div className="p-8 text-center text-xs text-slate-400">Chưa có đơn hàng nào trong mục này.</div>
+        )}
+      </div>
+
+      {/* Desktop Table (>= md) */}
+      <div className="hidden overflow-auto md:block">
       <table className="w-full min-w-[720px] text-left text-xs">
         <thead className="bg-white text-[10px] uppercase tracking-wide text-slate-400">
           <tr>
@@ -580,11 +711,33 @@ export function OrderTable({
                   <div className="text-[10px] font-normal text-slate-400">{o.delivery}</div>
                 </td>
                 <td className="px-5">
-                  <div className="font-semibold">{o.customer}</div>
-                  <div className="mt-0.5 text-[10px] text-slate-400">{o.items}</div>
+                  <div className="flex items-center gap-2">
+                    <UserAvatar
+                      name={o.customer}
+                      avatarUrl={o.customer_avatar_url}
+                      size="xs"
+                      verified={Boolean(o.customer_avatar_url)}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+                        <span>{o.customer}</span>
+                        {o.customer_group && (
+                          <span className="rounded bg-[#e8f5ec] px-1.5 py-0.5 text-[10px] font-bold text-[#176b52]">
+                            {o.customer_group}
+                          </span>
+                        )}
+                        {admin && o.customer_avatar_url && (
+                          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                            ✓ Có avatar
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-slate-400">{o.items}</div>
+                    </div>
+                  </div>
                   {o.shipper_name && (
                     <div className="mt-1 inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
-                      <FontAwesomeIcon icon={faMotorcycle} className="text-[9px]" />
+                      <FontAwesomeIcon icon={faMotorcycle} className="text-[10px]" />
                       <span>Shipper: {o.shipper_name} {o.shipper_phone ? `(${o.shipper_phone})` : ''}</span>
                     </div>
                   )}
@@ -600,7 +753,7 @@ export function OrderTable({
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     {admin && updateStatus && (
                       <div className="shrink-0">
-                        <OrderStatusControl id={o.id} status={o.status} updateStatus={updateStatus} />
+                        <OrderStatusControl id={o.id} apiId={o.apiId} status={o.status} updateStatus={updateStatus} />
                       </div>
                     )}
                     {canCancel && (
@@ -634,7 +787,8 @@ export function OrderTable({
           )}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -665,12 +819,14 @@ export function OrdersView({
   const shown = orders.filter(order => matchesTab(order.status, tab));
   return (
     <>
-      <div className="mb-4 flex gap-2 overflow-auto">
+      <div className="-mx-3 mb-4 flex gap-1.5 overflow-x-auto px-3 pb-1 scrollbar-hide sm:mx-0 sm:flex-wrap sm:gap-2 sm:px-0" role="tablist">
         {tabs.map(value => (
           <button
             onClick={() => setTab(value)}
             key={value}
-            className={`whitespace-nowrap rounded-xl px-4 py-2 text-xs font-semibold ${
+            role="tab"
+            aria-selected={tab === value}
+            className={`shrink-0 whitespace-nowrap rounded-xl px-4 py-2 text-xs font-semibold ${
               tab === value ? 'bg-[#176b52] text-white' : 'bg-white text-[#77847b]'
             }`}
           >

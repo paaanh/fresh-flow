@@ -31,6 +31,7 @@ export default function GlobalSearch({ admin, apiState, products, orders, reques
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState(false);
   const [active, setActive] = useState(-1);
   const [remote, setRemote] = useState<{ orders: Order[]; requests: Request[]; customers: Customer[] }>();
   const [loading, setLoading] = useState(false);
@@ -71,17 +72,28 @@ export default function GlobalSearch({ admin, apiState, products, orders, reques
 
   const results = searchResults(query, products, apiState === 'live' ? remote?.orders || [] : apiState === 'demo' ? demoOrders : [], apiState === 'live' ? remote?.requests || [] : apiState === 'demo' ? demoRequests : [], apiState === 'live' ? remote?.customers || [] : apiState === 'demo' && admin ? demoCustomers : []);
 
-  function select(result: Result) { setOpen(false); setQuery(''); setActive(-1); router.push(admin && !result.href.startsWith('/admin/') ? `/admin${result.href}` : result.href); }
+  function select(result: Result) { setOpen(false); setMobileExpanded(false); setQuery(''); setActive(-1); router.push(admin && !result.href.startsWith('/admin/') ? `/admin${result.href}` : result.href); }
 
-  return <div ref={root} className="relative" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false); }}>
-    <label className="sr-only" htmlFor={id}>Tìm kiếm toàn hệ thống</label>
-    <input ref={input} id={id} role="combobox" aria-expanded={open} aria-controls={`${id}-results`} aria-autocomplete="list" aria-activedescendant={active >= 0 && results[active] ? `${id}-${active}` : undefined} value={query} placeholder="Tìm kiếm nhanh…" onFocus={() => setOpen(true)} onChange={event => { setQuery(event.target.value); setActive(-1); setOpen(true); }} onKeyDown={event => {
-      if (event.key === 'Escape') { setOpen(false); setActive(-1); }
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); setActive(current => results.length ? (current + (event.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length : -1); }
-      if (event.key === 'Enter' && results.length) { event.preventDefault(); select(results[Math.max(0, Math.min(active, results.length - 1))]); }
-    }} className="h-10 w-36 rounded-xl border border-[#e6ebe6] bg-white px-3 pr-10 text-xs outline-none focus:border-[#176b52] sm:w-56" />
-    {query ? <button type="button" aria-label="Xóa tìm kiếm" onClick={() => { setQuery(''); setActive(-1); input.current?.focus(); }} className="absolute right-2 top-2 h-6 w-6 text-slate-500">×</button> : <span aria-hidden="true" className="pointer-events-none absolute right-2 top-3 text-[9px] text-slate-400">⌘K</span>}
-    {open && <div className="absolute right-0 top-full z-50 mt-2 max-h-[65vh] w-[min(420px,85vw)] overflow-y-auto rounded-xl border bg-white p-2 shadow-xl">
+  return <div ref={root} className="relative" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) { setOpen(false); setMobileExpanded(false); } }}>
+    <button
+      type="button"
+      onClick={() => { setMobileExpanded(v => !v); setOpen(true); setTimeout(() => input.current?.focus(), 20); }}
+      className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#e6ebe6] bg-white text-[#57695f] hover:bg-slate-50 sm:hidden"
+      aria-label="Mở tìm kiếm nhanh"
+    >
+      <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current stroke-2"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+    </button>
+
+    <div className={`${mobileExpanded ? 'fixed inset-x-3 top-[68px] z-50 rounded-2xl border border-[#dce4de] bg-white p-2 shadow-xl sm:static sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none' : 'hidden sm:block'}`}>
+      <label className="sr-only" htmlFor={id}>Tìm kiếm toàn hệ thống</label>
+      <input ref={input} id={id} role="combobox" aria-expanded={open} aria-controls={`${id}-results`} aria-autocomplete="list" aria-activedescendant={active >= 0 && results[active] ? `${id}-${active}` : undefined} value={query} placeholder="Tìm kiếm nhanh…" onFocus={() => setOpen(true)} onChange={event => { setQuery(event.target.value); setActive(-1); setOpen(true); }} onKeyDown={event => {
+        if (event.key === 'Escape') { setOpen(false); setMobileExpanded(false); setActive(-1); }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); setActive(current => results.length ? (current + (event.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length : -1); }
+        if (event.key === 'Enter' && results.length) { event.preventDefault(); select(results[Math.max(0, Math.min(active, results.length - 1))]); }
+      }} className="h-10 w-full rounded-xl border border-[#e6ebe6] bg-white px-3 pr-10 text-xs outline-none focus:border-[#176b52] sm:w-56" />
+      {query ? <button type="button" aria-label="Xóa tìm kiếm" onClick={() => { setQuery(''); setActive(-1); input.current?.focus(); }} className="absolute right-4 top-4 sm:right-2 sm:top-2 h-6 w-6 text-slate-500">×</button> : <span aria-hidden="true" className="pointer-events-none absolute right-5 top-5 sm:right-2 sm:top-3 text-[10px] text-slate-400">⌘K</span>}
+    </div>
+    {open && <div className="fixed inset-x-3 top-[124px] z-50 max-h-[65vh] overflow-y-auto rounded-xl border bg-white p-2 shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[min(420px,85vw)]">
       {loading && <p role="status" className="p-3 text-xs text-slate-500">Đang tải dữ liệu…</p>}
       {error && <p role="status" className="p-3 text-xs text-amber-700">{error}</p>}
       <div id={`${id}-results`} role="listbox" aria-label="Kết quả tìm kiếm">

@@ -82,11 +82,23 @@ export type UserOut = {
   vehicle_info?: string;
 };
 export type AddressIn = { label?: string; recipient: string; phone: string; line1: string; ward?: string; district?: string; city: string; is_default?: boolean };
-export type ProductIn = { name: string; description?: string; category_id?: number | null; unit?: string; image_url?: string | null; images?: string; attached_services?: string; base_price: number; shop_id?: number | null };
+export type ProductIn = { name: string; description?: string; category_id?: number | null; unit?: string; image_url?: string | null; images?: string; attached_services?: string; base_price: number; shop_id?: number | null; sale_price?: number | null; sale_start_at?: string | null; sale_end_at?: string | null };
+export type ShortageAction = 'PARTIAL' | 'WAIT' | 'OUT_OF_STOCK';
+export type StockCheck = {
+  order_id: number; order_number: string; status: string; inventory_state: string; can_fulfill: boolean;
+  lines: { product_id: number; product_name: string; unit: string; requested_quantity: number | string; available_quantity: number | string; shortage_quantity: number | string; competing_pending_orders: { order_id: number; order_number: string; created_at: string; quantity: number | string }[] }[];
+};
+export type InventoryRow = {
+  product_id: number; name: string; unit: string; category: string; shop_id?: number | null;
+  stock_quantity: number | string; reserved_quantity: number | string; available_quantity: number | string;
+  pending_quantity: number | string; shortage_quantity: number | string;
+  pending_orders: { order_id: number; order_number: string; quantity: number | string; created_at: string }[];
+  batches: { id: number; batch_date: string; stock_quantity: number | string; reserved_quantity: number | string; available_quantity: number | string }[];
+};
 export type BatchOut = { id: number; product_id: number; batch_date: string; initial_quantity: number | string; approved_quantity: number | string; is_open: boolean };
 export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'APPROVED' | 'REJECTED' | 'PREPARING' | 'READY_FOR_PICKUP' | 'PICKED_UP' | 'DELIVERING' | 'COMPLETED' | 'CANCELLED';
 export type OrderCreateIn = {
-  items: { batch_id: number; quantity: number }[];
+  items: { batch_id: number; quantity: number; post_id?: number }[];
   delivery_type: string;
   delivery_address?: string;
   recipient_name?: string;
@@ -117,7 +129,10 @@ export const freshflow = {
     try { return await api.get<UserOut>('/auth/me'); } catch (error) { authToken.clear(); throw error; }
   },
   me: () => api.get<UserOut>('/auth/me'),
-  updateProfile: (body: { full_name?: string; phone?: string | null; shop_name?: string | null; shop_description?: string; shop_address?: string; vehicle_info?: string }) => api.patch<UserOut>('/users/profile', body),
+  updateProfile: (body: { full_name?: string; phone?: string | null; shop_name?: string | null; shop_description?: string; shop_address?: string; vehicle_info?: string; avatar_url?: string | null }) => api.patch<UserOut>('/users/profile', body),
+  uploadAvatar: (form: FormData) => api.upload<UserOut>('/users/avatar', form),
+  shopCustomers: (search?: string) => api.get<UserOut[]>(`/customers${query({ search })}`),
+  assignCustomerGroup: (userId: number, customer_group: string) => api.patch<UserOut>(`/customers/${userId}/group`, { customer_group }),
   users: (search?: string) => api.get<UserOut[]>(`/admin/users${query({ search })}`),
   userStatus: (id: number, is_active: boolean) => api.patch<UserOut>(`/admin/users/${id}/status${query({ is_active })}`, undefined),
   adminUpdateUser: (id: number, body: Record<string, unknown>) => api.patch<UserOut>(`/admin/users/${id}`, body),
@@ -132,7 +147,17 @@ export const freshflow = {
 
   // Categories & Products
   categories: <T>() => api.get<T[]>('/categories'),
-  createCategory: <T>(name: string, description?: string) => api.post<T>('/admin/categories', description ? { name, description } : { name }),
+  createCategory: <T>(name: string, description?: string, parent_id?: number | null) =>
+    api.post<T>('/admin/categories', { name, ...(description ? { description } : {}), ...(parent_id ? { parent_id } : {}) }),
+  /** Rename and/or move a category (parent_id null = top level). */
+  updateCategory: <T>(id: number, body: { name?: string; parent_id?: number | null }) => api.patch<T>(`/admin/categories/${id}`, body),
+  deleteCategory: (id: number) => api.delete<{ deleted: number; moved_products: number; moved_to: number | null }>(`/admin/categories/${id}`),
+  /** Create many products (with opening stock) at once — all or nothing. */
+  createProductsBulk: <T>(items: { name: string; category_id?: number | null; unit: string; base_price: number; initial_stock?: number; image_url?: string | null }[]) =>
+    api.post<T[]>('/admin/products/bulk', { items }),
+  /** Receive stock for many products at once (one new batch each). */
+  receiveStock: (items: { product_id: number; quantity: number }[]) =>
+    api.post<{ received: number; product_ids: number[]; total_quantity: number }>('/admin/inventory/receive', { items }),
   products: <T>(category_id?: number, shop_id?: number) => api.get<T[]>(`/products${query({ category_id, shop_id })}`),
   catalog: <T>(category_id?: number, shop_id?: number) => api.get<T[]>(`/catalog/me${query({ category_id, shop_id })}`),
   createProduct: <T>(body: ProductIn) => api.post<T>('/admin/products', body),
@@ -154,6 +179,9 @@ export const freshflow = {
   orderHistory: <T>(id: number) => api.get<T[]>(`/orders/${id}/history`),
   orderStatus: <T>(id: number, status: OrderStatus, note?: string) => api.patch<T>(`/admin/orders/${id}/status`, { status, note }),
   assignShipper: <T>(id: number, shipper_id: number) => api.patch<T>(`/orders/${id}/assign-shipper`, { shipper_id }),
+  stockCheck: (id: number) => api.get<StockCheck>(`/orders/${id}/stock-check`),
+  resolveShortage: <T>(id: number, action: ShortageAction, note?: string) => api.post<T>(`/orders/${id}/resolve-shortage`, { action, note }),
+  inventoryOverview: () => api.get<InventoryRow[]>('/admin/inventory/overview'),
   updateOrderPayment: <T>(id: number, body: { paid_amount: number; payment_status: string; cash_collected?: number; note?: string }) => api.patch<T>(`/orders/${id}/payment`, body),
 
   // Shipper dedicated APIs
@@ -165,7 +193,12 @@ export const freshflow = {
   shipperSummary: <T>() => api.get<T>('/shipper/summary'),
 
   // Posts & Newfeed
-  posts: <T>(category_id?: number, shop_id?: number, post_type?: string) => api.get<T[]>(`/posts${query({ category_id, shop_id, post_type })}`),
+  posts: <T>(category_id?: number, shop_id?: number, post_type?: string, limit?: number, offset?: number) => api.get<T[]>(`/posts${query({ category_id, shop_id, post_type, limit, offset })}`),
+  togglePostLike: (id: number) => api.post<{ liked: boolean; like_count: number }>(`/posts/${id}/like`, undefined),
+  postComments: <T>(id: number) => api.get<T[]>(`/posts/${id}/comments`),
+  addPostComment: <T>(id: number, content: string) => api.post<T>(`/posts/${id}/comments`, { content }),
+  deletePostComment: (id: number, commentId: number) => api.delete<void>(`/posts/${id}/comments/${commentId}`),
+  feedSidebar: <T>() => api.get<T>('/posts/sidebar'),
   createPost: <T>(body: unknown) => api.post<T>('/posts', body),
   updatePost: <T>(id: number, body: unknown) => api.patch<T>(`/posts/${id}`, body),
   deletePost: (id: number) => api.delete<void>(`/posts/${id}`),
@@ -200,7 +233,7 @@ export const freshflow = {
   // Product requests & Notifications
   productRequests: <T>() => api.get<T[]>('/product-requests'),
   createRequest: <T>(product_name: string, description?: string) => api.post<T>('/product-requests', { product_name, description }),
-  respondRequest: <T>(id: number, body: { status: 'QUOTED' | 'ACCEPTED' | 'REJECTED' | 'FULFILLED'; admin_response?: string; quoted_price?: number }) => api.patch<T>(`/admin/product-requests/${id}`, body),
+  respondRequest: <T>(id: number, body: { status: 'QUOTED' | 'ACCEPTED' | 'REJECTED' | 'FULFILLED'; admin_response?: string; quoted_price?: number; product_id?: number | null; stock_quantity?: number | null; unit?: string; category_id?: number | null }) => api.patch<T>(`/admin/product-requests/${id}`, body),
   notifications: <T>() => api.get<T[]>('/notifications'),
   readNotification: (id: number) => api.patch<void>(`/notifications/${id}/read`, undefined),
   broadcastNotification: <T>(body: { title: string; body: string; target_role?: string | null }) => api.post<T>('/admin/notifications/broadcast', body),
