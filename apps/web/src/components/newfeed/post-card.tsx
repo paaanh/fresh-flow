@@ -21,6 +21,7 @@ import UserAvatar from '@/components/user-avatar';
 import { resolvePostImage } from '@/components/newfeed-parts';
 import { freshflow } from '@/lib/api';
 import { RichTextView, toPlainText } from '@/components/rich-text';
+import ScrollRow from '@/components/scroll-row';
 import type { Post, PostProductInfo, User } from '@/types/domain';
 import PostComments, { type PostCommentsHandle } from './post-comments';
 import { buyable, fullDate, parseImageUrls, postTypeMeta, relativeTime, shortDateTime } from './utils';
@@ -248,7 +249,7 @@ export default function PostCard({ post, currentUser, groupLabel, groupCount, mo
 
       {/* Tagged products: horizontal carousel */}
       {products.length > 0 && (
-        <ul className="flex snap-x snap-mandatory gap-2 overflow-x-auto px-3 py-3 scrollbar-hide sm:px-4" aria-label="Mặt hàng trong bài">
+        <ScrollRow as="ul" role={undefined} label="Mặt hàng trong bài" className="snap-x snap-mandatory scroll-px-3 gap-2 px-3 py-3 sm:scroll-px-4 sm:px-4">
           {products.map(prod => {
             const { price, base, onSale, saving } = viewerPrice(prod, previewGroup);
             const state = buyable(post, prod);
@@ -285,7 +286,7 @@ export default function PostCard({ post, currentUser, groupLabel, groupCount, mo
               </li>
             );
           })}
-        </ul>
+        </ScrollRow>
       )}
 
       {/* Interaction bar */}

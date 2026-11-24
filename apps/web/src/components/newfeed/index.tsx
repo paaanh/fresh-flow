@@ -10,6 +10,7 @@ import BuyModal from './buy-modal';
 import FeedSidebar from './feed-sidebar';
 import PostCard from './post-card';
 import PostComposer, { type ComposerFocus } from './post-composer';
+import ScrollRow from '@/components/scroll-row';
 import { pricingGroupsOf } from './utils';
 
 interface NewfeedProps {
@@ -134,8 +135,8 @@ export default function Newfeed({
       <div className="min-w-0 space-y-4">
         {/* Filters + "Thêm bài viết" (opens /newfeed/create) */}
         <div className="flex items-center gap-2 rounded-2xl border border-[#e8ede8] bg-white p-2 shadow-sm">
-          <div className="relative min-w-0 flex-1">
-          <div className="flex min-w-0 gap-1.5 overflow-x-auto pr-6 scrollbar-hide" role="tablist" aria-label="Lọc bài đăng">
+          {/* swipe on phones; drag, wheel or ‹ › with a mouse */}
+          <ScrollRow label="Lọc bài đăng">
             {[...FILTERS, ...(canPost ? [{ id: 'MINE', label: 'Bài của tôi', icon: faEdit }] : [])].map(tab => (
               <button
                 key={tab.id}
@@ -148,9 +149,7 @@ export default function Newfeed({
                 <FontAwesomeIcon icon={tab.icon} /> {tab.label}
               </button>
             ))}
-          </div>
-          <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-white to-transparent" />
-          </div>
+          </ScrollRow>
           {canPost && (
             <button
               type="button"

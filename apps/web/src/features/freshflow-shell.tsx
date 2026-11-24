@@ -29,6 +29,7 @@ import { Badge, Button } from '@/features/customer/pages/shared-ui';
 import CategoryManagerModal, { categoryPath, categoryTree, categoryWithChildren, type CategoryNode } from '@/components/category-manager-modal';
 import BulkProductsModal from '@/components/bulk-products-modal';
 import { formatQty, minQty, normalizeQty, roundQty } from '@/lib/quantity';
+import { installDragScroll } from '@/lib/drag-scroll';
 import { ProductDetail, ProductGrid, ProductsPanel } from '@/features/customer/pages/catalog';
 import { OrderDetailView, OrderTable, OrdersView } from '@/features/customer/pages/orders';
 import { RequestsView, type RequestFulfillment } from '@/features/customer/pages/requests';
@@ -129,6 +130,8 @@ export default function FreshFlowShell() {
         ? 'newfeed-create'
         : pathname.split('/').filter(Boolean).pop() || 'dashboard';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // chip rows (tabs, filters) can be dragged / wheeled sideways with a mouse
+  useEffect(() => installDragScroll(), []);
 
   const [role, setRole] = usePersistentState<'admin' | 'shop' | 'customer' | 'shipper'>('freshflow-role', 'customer');
   const [products, setProducts] = useState<Product[]>([]);
